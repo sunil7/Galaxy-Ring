@@ -1,0 +1,6 @@
+{
+  "name": "Galaxy Ring",
+  "description": "Smart ring health telemetry and sync companion for Galaxy Ring with Health Connect integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

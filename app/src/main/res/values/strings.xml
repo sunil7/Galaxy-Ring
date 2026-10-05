@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Galaxy Ring</string>
+    <string name="health_permissions_rationale">Galaxy Ring needs access to Health Connect to synchronize steps, heart rate, skin temperature, and sleep data recorded by your smart ring.</string>
+</resources>

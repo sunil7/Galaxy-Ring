@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer Ring Band Glow -->
+    <path
+        android:strokeWidth="5"
+        android:strokeColor="#3300E5FF"
+        android:fillColor="#00000000"
+        android:pathData="M 54,26 A 28,28 0 1,0 54,82 A 28,28 0 1,0 54,26" />
+
+    <!-- Main Titanium Ring Band -->
+    <path
+        android:strokeWidth="6"
+        android:pathData="M 54,27 A 27,27 0 1,0 54,81 A 27,27 0 1,0 54,27"
+        android:fillColor="#00000000">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="27"
+                android:startY="27"
+                android:endX="81"
+                android:endY="81"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFE2E8F0"/>
+                <item android:offset="0.5" android:color="#FF64748B"/>
+                <item android:offset="1.0" android:color="#FF38BDF8"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Inner Glow Sensor Line -->
+    <path
+        android:strokeWidth="2"
+        android:strokeColor="#FF00F0FF"
+        android:fillColor="#00000000"
+        android:pathData="M 54,32 A 22,22 0 0,0 32,54" />
+
+    <!-- Pulse / Vital Sensor Node on Inner Ring -->
+    <path
+        android:fillColor="#FF10B981"
+        android:pathData="M 54,32 A 3,3 0 1,1 54,26 A 3,3 0 1,1 54,32 Z" />
+
+    <path
+        android:fillColor="#FF00F0FF"
+        android:pathData="M 32,54 A 2.5,2.5 0 1,1 32,49 A 2.5,2.5 0 1,1 32,54 Z" />
+
+    <!-- Pulse Waveform Symbol in Center -->
+    <path
+        android:strokeWidth="2.5"
+        android:strokeColor="#FF38BDF8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M 41,54 L 46,54 L 49,46 L 52,61 L 56,50 L 59,57 L 62,54 L 67,54" />
+</vector>
