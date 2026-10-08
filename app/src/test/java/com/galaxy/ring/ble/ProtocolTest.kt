@@ -2,7 +2,6 @@ package com.galaxy.ring.ble
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -25,8 +24,6 @@ class ProtocolTest {
 
     @Test
     fun testParseHeartRate8Bit() {
-        // Flags: 0x00 (8-bit heart rate format)
-        // Value: 72 bpm
         val data = byteArrayOf(0x00, 72)
         val hr = Protocol.parseHeartRate(data)
         assertNotNull(hr)
@@ -35,8 +32,6 @@ class ProtocolTest {
 
     @Test
     fun testParseHeartRate16Bit() {
-        // Flags: 0x01 (16-bit format)
-        // Value: 140 bpm (0x008C -> LSB 0x8C, MSB 0x00)
         val data = byteArrayOf(0x01, 0x8C.toByte(), 0x00)
         val hr = Protocol.parseHeartRate(data)
         assertNotNull(hr)
@@ -45,9 +40,6 @@ class ProtocolTest {
 
     @Test
     fun testParseTemperature() {
-        // Flags: 0x00 (Celsius)
-        // Value: 36.5 deg C = 3650 with exponent -2 (0xFE)
-        // 3650 = 0x000E42 -> byte 1: 0x42, byte 2: 0x0E, byte 3: 0x00, exponent: -2 (0xFE)
         val data = byteArrayOf(0x00, 0x42, 0x0E, 0x00, (-2).toByte())
         val temp = Protocol.parseTemperature(data)
         assertNotNull(temp)
@@ -60,27 +52,19 @@ class ProtocolTest {
         assertEquals(Protocol.FRAME_HEADER_1, ping[0])
         assertEquals(Protocol.FRAME_HEADER_2, ping[1])
         assertEquals(Protocol.CMD_PING, ping[2])
-        assertEquals(0.toByte(), ping[3]) // 0 length payload
+        assertEquals(0.toByte(), ping[3])
 
-        // Verify checksum is XOR of bytes 0..3
         val expectedChecksum = (ping[0].toInt() xor ping[1].toInt() xor ping[2].toInt() xor ping[3].toInt()).toByte()
         assertEquals(expectedChecksum, ping[4])
     }
 
     @Test
     fun testBuildAndParseCustomRingPayload() {
-        // Header: 0xAA, 0x55
-        // Cmd: CMD_RING_TELEMETRY_RESPONSE (0x10)
-        // Payload Length: 9 bytes
-        // [4]: Battery = 80
-        // [5..6]: HR = 68 (0x0044)
-        // [7..10]: Steps = 5000 (0x00001388)
-        // [11..12]: Temp = 3660 (36.6 C, 0x0E4C)
         val payload = byteArrayOf(
-            80,                     // Battery
-            0x44, 0x00,             // HR 68 bpm
-            0x88.toByte(), 0x13, 0x00, 0x00, // Steps 5000
-            0x4C, 0x0E              // Temp 3660 -> 36.6 C
+            80,
+            0x44, 0x00,
+            0x88.toByte(), 0x13, 0x00, 0x00,
+            0x4C, 0x0E
         )
 
         val packet = Protocol.buildCommand(Protocol.CMD_RING_TELEMETRY_RESPONSE, payload)
@@ -91,5 +75,48 @@ class ProtocolTest {
         assertEquals(68, snapshot?.latestHeartRate?.bpm)
         assertEquals(5000L, snapshot?.steps?.totalSteps)
         assertEquals(36.6f, snapshot?.temperature?.temperatureCelsius ?: 0f, 0.1f)
+    }
+
+    @Test
+    fun testCrc16Arc() {
+        // Standard check vector for CRC16-ARC with "123456789": 0xBB3D
+        val checkBytes = "123456789".toByteArray(Charsets.US_ASCII)
+        val crc = Protocol.crc16Arc(checkBytes)
+        assertEquals(0xBB3D, crc)
+    }
+
+    @Test
+    fun testBuildSr16FrameAndValidation() {
+        val cmd = Protocol.CMD_MEASURE_HEART_RATE // 0x02, 0x24
+        val frame = Protocol.buildSr16Frame(cmd)
+
+        assertEquals(Protocol.FRAME_HEADER_SR16, frame[0])
+        assertEquals(2.toByte(), frame[1]) // Length
+        assertEquals(0x02.toByte(), frame[2])
+        assertEquals(0x24.toByte(), frame[3])
+
+        // Verify framing and CRC check
+        assertTrue(Protocol.isValidSr16Frame(frame))
+    }
+
+    @Test
+    fun testParseSr16Biometrics() {
+        // Heart rate payload: [0x02, 0x24, status=0, bpm=74]
+        val hrPayload = byteArrayOf(0x02, 0x24, 0x00, 74)
+        val hr = Protocol.parseSr16HeartRate(hrPayload)
+        assertNotNull(hr)
+        assertEquals(74, hr?.bpm)
+
+        // SpO2 payload: [0x02, 0x4E, status=0, pct=98]
+        val spo2Payload = byteArrayOf(0x02, 0x4E, 0x00, 98)
+        val spo2 = Protocol.parseSr16SpO2(spo2Payload)
+        assertNotNull(spo2)
+        assertEquals(98f, spo2?.percentage ?: 0f, 0.1f)
+
+        // Steps payload: [0x05, 0x1A, steps LSB..MSB] -> 8200 steps (0x00002008)
+        val stepsPayload = byteArrayOf(0x05, 0x1A, 0x08, 0x20, 0x00, 0x00)
+        val steps = Protocol.parseSr16Steps(stepsPayload)
+        assertNotNull(steps)
+        assertEquals(8200L, steps?.totalSteps)
     }
 }

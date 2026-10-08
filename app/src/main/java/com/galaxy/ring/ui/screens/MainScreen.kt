@@ -28,20 +28,26 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.Bloodtype
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.HealthAndSafety
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.Vibration
+import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material.icons.outlined.BluetoothSearching
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Button
@@ -56,6 +62,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -68,6 +77,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -89,8 +99,11 @@ import androidx.compose.ui.unit.sp
 import com.galaxy.ring.GalaxyRingApp
 import com.galaxy.ring.data.ConnectionState
 import com.galaxy.ring.data.HeartRateSample
+import com.galaxy.ring.data.ManualMeasurementState
+import com.galaxy.ring.data.OxygenSaturationSample
 import com.galaxy.ring.data.RingDevice
 import com.galaxy.ring.data.RingHealthSnapshot
+import com.galaxy.ring.data.SleepSession
 import com.galaxy.ring.data.SleepStage
 import com.galaxy.ring.data.SyncStatus
 import com.galaxy.ring.ui.theme.CyberCyan
@@ -115,10 +128,12 @@ fun MainScreen(
     val connectionState by bleRepo.connectionState.collectAsState()
     val snapshot by bleRepo.snapshot.collectAsState()
     val discoveredDevices by bleRepo.discoveredDevices.collectAsState()
+    val measurementState by bleRepo.manualMeasurementState.collectAsState()
 
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    var selectedTab by remember { mutableIntStateOf(0) }
     var syncStatus by remember { mutableStateOf<SyncStatus>(SyncStatus.Idle) }
     var showScanSheet by remember { mutableStateOf(false) }
     var isFindingRing by remember { mutableStateOf(false) }
@@ -137,103 +152,109 @@ fun MainScreen(
                 }
             )
         },
+        bottomBar = {
+            NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surface,
+                tonalElevation = 8.dp
+            ) {
+                val items = listOf(
+                    Triple(0, "Device", Icons.Default.Watch),
+                    Triple(1, "History", Icons.Default.History),
+                    Triple(2, "Sleep", Icons.Default.Nightlight),
+                    Triple(3, "Settings", Icons.Default.Settings)
+                )
+
+                items.forEach { (index, title, icon) ->
+                    val isSelected = selectedTab == index
+                    NavigationBarItem(
+                        selected = isSelected,
+                        onClick = { selectedTab = index },
+                        icon = { Icon(imageVector = icon, contentDescription = title) },
+                        label = { Text(title) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Color(0xFF0F172A),
+                            selectedTextColor = CyberCyan,
+                            indicatorColor = CyberCyan,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    )
+                }
+            }
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item { Spacer(modifier = Modifier.height(4.dp)) }
-
-            // 1. Interactive Ring Hero Card
-            item {
-                RingHeroCard(
-                    connectionState = connectionState,
-                    snapshot = snapshot,
-                    isFindingRing = isFindingRing,
-                    onFindMyRing = {
-                        isFindingRing = true
-                        bleRepo.findMyRing()
-                        scope.launch {
-                            snackbarHostState.showSnackbar("Pulsing ring sensor lights and haptic signal...")
-                            kotlinx.coroutines.delay(4000)
-                            isFindingRing = false
-                        }
-                    },
-                    onConnectClick = {
-                        onRequestBlePermissions()
-                        bleRepo.startScan()
-                        showScanSheet = true
-                    }
-                )
-            }
-
-            // 2. Health Connect Sync Status & Action Banner
-            item {
-                HealthConnectSyncCard(
-                    hasPermissions = hasHealthPermissions,
-                    syncStatus = syncStatus,
-                    lastSyncTime = snapshot.lastSyncTimestamp,
-                    onSyncNow = {
-                        scope.launch {
-                            syncStatus = SyncStatus.Syncing
-                            try {
-                                val updated = bleRepo.requestSync()
-                                val success = healthWriter.writeSnapshot(updated)
-                                syncStatus = if (success) {
-                                    SyncStatus.Success("Synced vitals to Health Connect")
-                                } else {
-                                    SyncStatus.Success("Synced locally (Health Connect ready)")
-                                }
-                                snackbarHostState.showSnackbar("Vitals synchronized with Health Connect")
-                            } catch (e: Exception) {
-                                syncStatus = SyncStatus.Error(e.message ?: "Sync error")
+            when (selectedTab) {
+                0 -> {
+                    // Device / Home Dashboard
+                    DeviceDashboard(
+                        connectionState = connectionState,
+                        snapshot = snapshot,
+                        measurementState = measurementState,
+                        hasHealthPermissions = hasHealthPermissions,
+                        syncStatus = syncStatus,
+                        isFindingRing = isFindingRing,
+                        onFindMyRing = {
+                            isFindingRing = true
+                            bleRepo.findMyRing()
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Pulsing ring sensor lights and haptics...")
+                                kotlinx.coroutines.delay(4000)
+                                isFindingRing = false
                             }
-                        }
-                    },
-                    onRequestPermissions = onRequestHealthPermissions,
-                    onOpenRationale = onOpenRationale
-                )
-            }
-
-            // 3. Heart Rate Card with Live Pulse & Mini Waveform
-            item {
-                HeartRateCard(
-                    latestSample = snapshot.latestHeartRate,
-                    history = snapshot.heartRateHistory
-                )
-            }
-
-            // 4. Daily Steps & Activity Card
-            item {
-                StepsCard(steps = snapshot.steps)
-            }
-
-            // 5. Sleep & Nightly Recovery Card
-            item {
-                SleepCard(snapshot = snapshot)
-            }
-
-            // 6. Skin Temperature & Ring Battery Split Grid
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        SkinTempCard(temp = snapshot.temperature)
-                    }
-                    Box(modifier = Modifier.weight(1f)) {
-                        BatteryCard(battery = snapshot.battery)
-                    }
+                        },
+                        onConnectClick = {
+                            onRequestBlePermissions()
+                            bleRepo.startScan()
+                            showScanSheet = true
+                        },
+                        onMeasureHeartRate = {
+                            bleRepo.measureHeartRate()
+                        },
+                        onMeasureSpo2 = {
+                            bleRepo.measureOxygenSaturation()
+                        },
+                        onSyncNow = {
+                            scope.launch {
+                                syncStatus = SyncStatus.Syncing
+                                try {
+                                    val updated = bleRepo.requestSync()
+                                    val success = healthWriter.writeSnapshot(updated)
+                                    syncStatus = if (success) {
+                                        SyncStatus.Success("Synced vitals to Health Connect")
+                                    } else {
+                                        SyncStatus.Success("Synced locally (Health Connect ready)")
+                                    }
+                                    snackbarHostState.showSnackbar("Vitals synchronized with Health Connect")
+                                } catch (e: Exception) {
+                                    syncStatus = SyncStatus.Error(e.message ?: "Sync error")
+                                }
+                            }
+                        },
+                        onRequestPermissions = onRequestHealthPermissions,
+                        onOpenRationale = onOpenRationale,
+                        onNavigateToSleep = { selectedTab = 2 }
+                    )
+                }
+                1 -> {
+                    HistoryScreen()
+                }
+                2 -> {
+                    SleepScreen()
+                }
+                3 -> {
+                    SettingsScreen(
+                        onOpenHealthRationale = onOpenRationale,
+                        hasHealthPermissions = hasHealthPermissions
+                    )
                 }
             }
-
-            item { Spacer(modifier = Modifier.height(24.dp)) }
         }
     }
 
@@ -257,6 +278,575 @@ fun MainScreen(
                 onRefresh = {
                     bleRepo.startScan()
                 }
+            )
+        }
+    }
+}
+
+@Composable
+fun DeviceDashboard(
+    connectionState: ConnectionState,
+    snapshot: RingHealthSnapshot,
+    measurementState: ManualMeasurementState,
+    hasHealthPermissions: Boolean,
+    syncStatus: SyncStatus,
+    isFindingRing: Boolean,
+    onFindMyRing: () -> Unit,
+    onConnectClick: () -> Unit,
+    onMeasureHeartRate: () -> Unit,
+    onMeasureSpo2: () -> Unit,
+    onSyncNow: () -> Unit,
+    onRequestPermissions: () -> Unit,
+    onOpenRationale: () -> Unit,
+    onNavigateToSleep: () -> Unit
+) {
+    val isReady = connectionState is ConnectionState.Ready || connectionState is ConnectionState.Connected
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item { Spacer(modifier = Modifier.height(4.dp)) }
+
+        // 1. Connection Status Banner
+        item {
+            ConnectionStatusBanner(connectionState = connectionState)
+        }
+
+        // 2. Interactive Ring Hero Card
+        item {
+            RingHeroCard(
+                connectionState = connectionState,
+                snapshot = snapshot,
+                isFindingRing = isFindingRing,
+                onFindMyRing = onFindMyRing,
+                onConnectClick = onConnectClick
+            )
+        }
+
+        // 3. Two Prominent Manual Measurement Buttons (Heart Rate & SpO₂)
+        item {
+            ManualMeasurementsCard(
+                isReady = isReady,
+                measurementState = measurementState,
+                latestHeartRate = snapshot.latestHeartRate,
+                latestSpo2 = snapshot.latestOxygenSaturation,
+                onMeasureHeartRate = onMeasureHeartRate,
+                onMeasureSpo2 = onMeasureSpo2
+            )
+        }
+
+        // 4. Sleep Goal Progress Ring Banner
+        item {
+            SleepGoalProgressRingCard(
+                snapshot = snapshot,
+                onCardClick = onNavigateToSleep
+            )
+        }
+
+        // 5. Health Connect Sync Card
+        item {
+            HealthConnectSyncCard(
+                hasPermissions = hasHealthPermissions,
+                syncStatus = syncStatus,
+                lastSyncTime = snapshot.lastSyncTimestamp,
+                onSyncNow = onSyncNow,
+                onRequestPermissions = onRequestPermissions,
+                onOpenRationale = onOpenRationale
+            )
+        }
+
+        // 6. Heart Rate Card with Live Pulse & Waveform
+        item {
+            HeartRateCard(
+                latestSample = snapshot.latestHeartRate,
+                history = snapshot.heartRateHistory
+            )
+        }
+
+        // 7. SpO₂ Blood Oxygen Card
+        item {
+            Spo2Card(
+                latestSample = snapshot.latestOxygenSaturation,
+                history = snapshot.oxygenSaturationHistory
+            )
+        }
+
+        // 8. Daily Steps Card
+        item {
+            StepsCard(steps = snapshot.steps)
+        }
+
+        // 9. Split Grid: Skin Temp & Battery
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    SkinTempCard(temp = snapshot.temperature)
+                }
+                Box(modifier = Modifier.weight(1f)) {
+                    BatteryCard(battery = snapshot.battery)
+                }
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+fun ConnectionStatusBanner(connectionState: ConnectionState) {
+    val (bgColor, textColor, icon, label) = when (connectionState) {
+        is ConnectionState.Ready -> Quadruple(
+            NeonEmerald.copy(alpha = 0.15f),
+            NeonEmerald,
+            Icons.Default.CheckCircle,
+            "Ready – Active Telemetry & Sensors"
+        )
+        is ConnectionState.Initializing -> Quadruple(
+            CyberCyan.copy(alpha = 0.15f),
+            CyberCyan,
+            Icons.Default.Sync,
+            "Initializing (Step ${connectionState.currentStep}/${connectionState.totalSteps})..."
+        )
+        is ConnectionState.Syncing -> Quadruple(
+            CyberCyan.copy(alpha = 0.15f),
+            CyberCyan,
+            Icons.Default.Sync,
+            "Syncing – ${connectionState.message}"
+        )
+        is ConnectionState.Connecting -> Quadruple(
+            CyberCyan.copy(alpha = 0.15f),
+            CyberCyan,
+            Icons.Default.Bluetooth,
+            "Connecting to ${connectionState.deviceName}..."
+        )
+        is ConnectionState.Connected -> Quadruple(
+            NeonEmerald.copy(alpha = 0.15f),
+            NeonEmerald,
+            Icons.Default.BluetoothConnected,
+            "Connected – Handshake in progress"
+        )
+        is ConnectionState.Scanning -> Quadruple(
+            CyberCyan.copy(alpha = 0.15f),
+            CyberCyan,
+            Icons.Default.Refresh,
+            "Scanning for Galaxy Ring / SR16..."
+        )
+        is ConnectionState.Error -> Quadruple(
+            RosePulse.copy(alpha = 0.15f),
+            RosePulse,
+            Icons.Default.Error,
+            connectionState.message
+        )
+        is ConnectionState.Disconnected -> Quadruple(
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+            Icons.Default.Bluetooth,
+            "Disconnected – Pair ring to start sync"
+        )
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = bgColor)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = textColor,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                color = textColor,
+                modifier = Modifier.weight(1f)
+            )
+            if (connectionState is ConnectionState.Initializing || connectionState is ConnectionState.Syncing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    color = textColor,
+                    strokeWidth = 2.dp
+                )
+            }
+        }
+    }
+}
+
+data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+
+@Composable
+fun ManualMeasurementsCard(
+    isReady: Boolean,
+    measurementState: ManualMeasurementState,
+    latestHeartRate: HeartRateSample,
+    latestSpo2: OxygenSaturationSample?,
+    onMeasureHeartRate: () -> Unit,
+    onMeasureSpo2: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = CardDefaults.outlinedCardBorder().copy(
+            brush = Brush.horizontalGradient(
+                listOf(
+                    CyberCyan.copy(alpha = 0.3f),
+                    ElectricViolet.copy(alpha = 0.2f),
+                    Color.Transparent
+                )
+            )
+        )
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Text(
+                text = "Manual Biometric Measurements",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = if (isReady) "Trigger real-time PPG sensor capture from ring" else "Available when connection state is READY",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Measurement Active Progress Indicator
+            if (measurementState is ManualMeasurementState.Measuring) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(CyberCyan.copy(alpha = 0.1f))
+                        .padding(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Measuring ${measurementState.metric}...",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = CyberCyan
+                        )
+                        Text(
+                            text = "${(measurementState.progress * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = CyberCyan
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        progress = { measurementState.progress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = CyberCyan,
+                        trackColor = CyberCyan.copy(alpha = 0.2f)
+                    )
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+            } else if (measurementState is ManualMeasurementState.Success) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(NeonEmerald.copy(alpha = 0.12f))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = NeonEmerald,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Recorded ${measurementState.metric}: ${measurementState.displayValue}  (${DateFormat.format("h:mm a", Date(measurementState.timestamp))})",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = NeonEmerald
+                    )
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+            } else if (measurementState is ManualMeasurementState.Error) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(RosePulse.copy(alpha = 0.12f))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Error,
+                        contentDescription = null,
+                        tint = RosePulse,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = measurementState.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = RosePulse
+                    )
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+            }
+
+            // Two Prominent Action Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                val isHrMeasuring = measurementState is ManualMeasurementState.Measuring && measurementState.metric == "Heart Rate"
+                Button(
+                    onClick = onMeasureHeartRate,
+                    enabled = isReady && measurementState !is ManualMeasurementState.Measuring,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("measure_heart_rate_button"),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = RosePulse)
+                ) {
+                    if (isHrMeasuring) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                    } else {
+                        Icon(imageVector = Icons.Default.Favorite, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Measure HR", fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                val isSpo2Measuring = measurementState is ManualMeasurementState.Measuring && measurementState.metric == "SpO₂"
+                Button(
+                    onClick = onMeasureSpo2,
+                    enabled = isReady && measurementState !is ManualMeasurementState.Measuring,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("measure_spo2_button"),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                ) {
+                    if (isSpo2Measuring) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color(0xFF0F172A), strokeWidth = 2.dp)
+                    } else {
+                        Icon(imageVector = Icons.Default.Bloodtype, contentDescription = null, tint = Color(0xFF0F172A), modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Measure SpO₂", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SleepGoalProgressRingCard(
+    snapshot: RingHealthSnapshot,
+    onCardClick: () -> Unit
+) {
+    val app = GalaxyRingApp.instance
+    val targetHours = app.healthRepository.sleepTargetHours
+    val sleep = snapshot.latestSleep
+
+    val actualMinutes = sleep?.durationMinutes ?: (6 * 60 + 42L) // 6h 42m
+    val targetMinutes = (targetHours * 60).toLong()
+    val progress = (actualMinutes.toFloat() / targetMinutes.toFloat()).coerceIn(0f, 1f)
+
+    val actualH = actualMinutes / 60
+    val actualM = actualMinutes % 60
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCardClick() },
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Nightlight,
+                        contentDescription = null,
+                        tint = ElectricViolet,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Sleep Goal Progress",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "Last night: ${actualH}h ${actualM}m / ${targetHours.toInt()}h target",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = "Quality score: ${sleep?.qualityScore ?: 84}/100 • Restorative sleep",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ElectricViolet
+                )
+            }
+
+            // Circular Progress Ring
+            Box(
+                modifier = Modifier.size(68.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val stroke = 8.dp.toPx()
+                    val center = Offset(size.width / 2, size.height / 2)
+                    val radius = (size.minDimension - stroke) / 2
+
+                    // Track
+                    drawCircle(
+                        color = ElectricViolet.copy(alpha = 0.2f),
+                        radius = radius,
+                        center = center,
+                        style = Stroke(width = stroke)
+                    )
+
+                    // Arc
+                    drawArc(
+                        brush = Brush.sweepGradient(
+                            listOf(CyberCyan, ElectricViolet, CyberCyan)
+                        ),
+                        startAngle = -90f,
+                        sweepAngle = 360f * progress,
+                        useCenter = false,
+                        topLeft = Offset(center.x - radius, center.y - radius),
+                        size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
+                        style = Stroke(width = stroke, cap = StrokeCap.Round)
+                    )
+                }
+
+                Text(
+                    text = "${(progress * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun Spo2Card(
+    latestSample: OxygenSaturationSample?,
+    history: List<OxygenSaturationSample>
+) {
+    val spo2Val = latestSample?.percentage ?: 98.0f
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Bloodtype,
+                        contentDescription = "SpO2",
+                        tint = CyberCyan,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Blood Oxygen (SpO₂)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Text(
+                    text = "Normal: 95–100%",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = "${spo2Val.toInt()}",
+                    style = MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "%",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = CyberCyan,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                Text(
+                    text = "Optimal Oxygenation",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = NeonEmerald,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(NeonEmerald.copy(alpha = 0.15f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            LinearProgressIndicator(
+                progress = { (spo2Val / 100f).coerceIn(0f, 1f) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+                color = CyberCyan,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
             )
         }
     }
@@ -296,15 +886,21 @@ fun GalaxyRingTopBar(
                     )
                     Text(
                         text = when (connectionState) {
+                            is ConnectionState.Ready -> "Ready"
                             is ConnectionState.Connected -> "Connected"
+                            is ConnectionState.Initializing -> "Initializing..."
+                            is ConnectionState.Syncing -> "Syncing..."
                             is ConnectionState.Scanning -> "Scanning..."
                             is ConnectionState.Connecting -> "Connecting..."
+                            is ConnectionState.Error -> "Error"
                             else -> "Disconnected"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = when (connectionState) {
+                            is ConnectionState.Ready -> NeonEmerald
                             is ConnectionState.Connected -> NeonEmerald
-                            is ConnectionState.Scanning -> CyberCyan
+                            is ConnectionState.Initializing, is ConnectionState.Syncing -> CyberCyan
+                            is ConnectionState.Error -> RosePulse
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         }
                     )
@@ -312,7 +908,6 @@ fun GalaxyRingTopBar(
             }
         },
         actions = {
-            // Battery pill
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -359,7 +954,7 @@ fun RingHeroCard(
     onFindMyRing: () -> Unit,
     onConnectClick: () -> Unit
 ) {
-    val isConnected = connectionState is ConnectionState.Connected
+    val isConnected = connectionState is ConnectionState.Ready || connectionState is ConnectionState.Connected || connectionState is ConnectionState.Initializing || connectionState is ConnectionState.Syncing
 
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseScale by infiniteTransition.animateFloat(
@@ -375,9 +970,7 @@ fun RingHeroCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = CardDefaults.outlinedCardBorder().copy(
             brush = Brush.linearGradient(
                 colors = listOf(
@@ -394,10 +987,9 @@ fun RingHeroCard(
                 .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Visual Ring Canvas
             Box(
                 modifier = Modifier
-                    .size(160.dp)
+                    .size(150.dp)
                     .padding(8.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -405,7 +997,6 @@ fun RingHeroCard(
                     val center = Offset(size.width / 2, size.height / 2)
                     val radius = (size.minDimension / 2) - 16.dp.toPx()
 
-                    // Outer ambient glow
                     drawCircle(
                         brush = Brush.radialGradient(
                             colors = listOf(
@@ -417,7 +1008,6 @@ fun RingHeroCard(
                         )
                     )
 
-                    // Metallic Ring Band
                     drawCircle(
                         brush = Brush.sweepGradient(
                             listOf(
@@ -433,14 +1023,12 @@ fun RingHeroCard(
                         style = Stroke(width = 16.dp.toPx())
                     )
 
-                    // Inner Sensor Track
                     drawCircle(
                         color = Color(0xFF0F172A),
                         radius = radius - 8.dp.toPx(),
                         style = Stroke(width = 4.dp.toPx())
                     )
 
-                    // Active Biosensor LED Nodes
                     val sensorCount = 3
                     for (i in 0 until sensorCount) {
                         val angle = (i * (360f / sensorCount) + 30) * (Math.PI / 180.0)
@@ -457,7 +1045,6 @@ fun RingHeroCard(
                     }
                 }
 
-                // Center Ring info
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
                         imageVector = if (isConnected) Icons.Default.BluetoothConnected else Icons.Default.Bluetooth,
@@ -467,17 +1054,17 @@ fun RingHeroCard(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (isConnected) "Size 10" else "No Ring",
+                        text = if (isConnected) "SR16 Active" else "No Ring",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             Text(
-                text = if (isConnected) "Galaxy Ring (Titanium Black)" else "Galaxy Ring Not Connected",
+                text = if (isConnected) "Galaxy Ring / SR16 Smart Ring" else "Galaxy Ring Not Connected",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -490,7 +1077,7 @@ fun RingHeroCard(
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -552,9 +1139,7 @@ fun HealthConnectSyncCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-        )
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -598,9 +1183,7 @@ fun HealthConnectSyncCard(
                     FilledTonalButton(
                         onClick = onRequestPermissions,
                         shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = CyberCyan.copy(alpha = 0.2f)
-                        )
+                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = CyberCyan.copy(alpha = 0.2f))
                     ) {
                         Text("Grant", color = CyberCyan, style = MaterialTheme.typography.labelMedium)
                     }
@@ -726,7 +1309,6 @@ fun HeartRateCard(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Sparkline Waveform Canvas
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -762,7 +1344,6 @@ fun HeartRateCard(
                         }
                     }
 
-                    // Draw gradient area under curve
                     drawPath(
                         path = fillPath,
                         brush = Brush.verticalGradient(
@@ -773,7 +1354,6 @@ fun HeartRateCard(
                         )
                     )
 
-                    // Draw line
                     drawPath(
                         path = path,
                         color = RosePulse,
@@ -863,108 +1443,6 @@ fun StepsCard(steps: com.galaxy.ring.data.StepData) {
                 MetricColumn(title = "Progress", value = "${(progress * 100).toInt()}%")
             }
         }
-    }
-}
-
-@Composable
-fun SleepCard(snapshot: RingHealthSnapshot) {
-    val sleep = snapshot.latestSleep
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column(modifier = Modifier.padding(18.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Nightlight,
-                        contentDescription = "Sleep",
-                        tint = ElectricViolet,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Sleep & Recovery",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-                Text(
-                    text = "Score: ${sleep?.qualityScore ?: 85}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = ElectricViolet,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(ElectricViolet.copy(alpha = 0.15f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            val durationHours = (sleep?.durationMinutes ?: 445) / 60
-            val durationMin = (sleep?.durationMinutes ?: 445) % 60
-
-            Text(
-                text = "${durationHours}h ${durationMin}m",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Sleep Stages Bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(10.dp)
-                    .clip(RoundedCornerShape(5.dp))
-            ) {
-                Box(modifier = Modifier.weight(0.22f).fillMaxSize().background(Color(0xFF38BDF8))) // Deep
-                Box(modifier = Modifier.weight(0.28f).fillMaxSize().background(Color(0xFFA855F7))) // REM
-                Box(modifier = Modifier.weight(0.42f).fillMaxSize().background(Color(0xFF64748B))) // Light
-                Box(modifier = Modifier.weight(0.08f).fillMaxSize().background(Color(0xFFF59E0B))) // Awake
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                SleepStageLegend(color = Color(0xFF38BDF8), label = "Deep", percent = "22%")
-                SleepStageLegend(color = Color(0xFFA855F7), label = "REM", percent = "28%")
-                SleepStageLegend(color = Color(0xFF64748B), label = "Light", percent = "42%")
-                SleepStageLegend(color = Color(0xFFF59E0B), label = "Awake", percent = "8%")
-            }
-        }
-    }
-}
-
-@Composable
-fun SleepStageLegend(color: Color, label: String, percent: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(color)
-        )
-        Spacer(modifier = Modifier.width(4.dp))
-        Text(
-            text = "$label $percent",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }
 
@@ -1076,60 +1554,44 @@ fun ScanDevicesSheetContent(
             Text(
                 text = "Nearby Smart Rings",
                 style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
+                fontWeight = FontWeight.Bold
             )
-            IconButton(onClick = onRefresh) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Refresh",
-                    tint = CyberCyan
-                )
+            if (isScanning) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                IconButton(onClick = onRefresh) {
+                    Icon(imageVector = Icons.Default.Refresh, contentDescription = "Refresh", tint = CyberCyan)
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        if (isScanning) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                    color = CyberCyan
-                )
-                Spacer(modifier = Modifier.width(8.dp))
+        if (devices.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp),
+                contentAlignment = Alignment.Center
+            ) {
                 Text(
-                    text = "Scanning for Galaxy Ring devices over BLE...",
-                    style = MaterialTheme.typography.bodySmall,
+                    text = if (isScanning) "Searching for SR16 / Galaxy Ring..." else "No devices found. Tap refresh to scan again.",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-
-        if (devices.isEmpty() && !isScanning) {
-            Text(
-                text = "No devices detected. Tap refresh or ensure Bluetooth is turned on.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(vertical = 16.dp)
-            )
         } else {
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(280.dp),
+                modifier = Modifier.height(260.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(devices) { device ->
+                items(devices) { dev ->
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onDeviceSelect(device) },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
+                            .clickable { onDeviceSelect(dev) },
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Row(
                             modifier = Modifier
@@ -1140,19 +1602,18 @@ fun ScanDevicesSheetContent(
                         ) {
                             Column {
                                 Text(
-                                    text = device.name,
+                                    text = dev.name,
                                     style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = device.address,
+                                    text = dev.address,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             Text(
-                                text = "${device.rssi} dBm",
+                                text = "${dev.rssi} dBm",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = CyberCyan
                             )

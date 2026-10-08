@@ -1,7 +1,5 @@
 package com.galaxy.ring.data
 
-import java.time.Instant
-
 /**
  * Represents a discovered or connected Galaxy Ring device.
  */
@@ -29,6 +27,14 @@ data class RingBattery(
 data class HeartRateSample(
     val bpm: Int,
     val confidence: Int = 100,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+/**
+ * SpO₂ (Blood Oxygen) measurement.
+ */
+data class OxygenSaturationSample(
+    val percentage: Float,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -79,28 +85,68 @@ data class SleepSession(
 }
 
 /**
+ * In-depth sleep analysis calculated using clinical standard heuristics.
+ */
+data class SleepAnalysis(
+    val totalBedTimeMinutes: Long,
+    val timeAsleepMinutes: Long,
+    val deepMinutes: Long,
+    val deepPercent: Float,
+    val lightMinutes: Long,
+    val lightPercent: Float,
+    val remMinutes: Long,
+    val remPercent: Float,
+    val awakeMinutes: Long,
+    val awakePercent: Float,
+    val sleepEfficiency: Float, // (timeAsleep / totalBedTime)
+    val sleepScore: Int, // 0..100
+    val targetDurationMinutes: Long = 480L, // default 8 hours
+    val awakeningsCount: Int = 0,
+    val deltaPreviousNightScore: Int? = null,
+    val deltaSevenDayAvgScore: Int? = null,
+    val deltaPreviousNightDurationMin: Long? = null,
+    val deltaSevenDayAvgDurationMin: Long? = null
+)
+
+/**
  * Combined telemetry snapshot from the Galaxy Ring.
  */
 data class RingHealthSnapshot(
     val battery: RingBattery = RingBattery(level = 82, isCharging = false),
     val latestHeartRate: HeartRateSample = HeartRateSample(bpm = 68),
     val heartRateHistory: List<HeartRateSample> = emptyList(),
+    val latestOxygenSaturation: OxygenSaturationSample? = OxygenSaturationSample(percentage = 98.0f),
+    val oxygenSaturationHistory: List<OxygenSaturationSample> = emptyList(),
     val steps: StepData = StepData(totalSteps = 6420),
     val temperature: SkinTemperature = SkinTemperature(temperatureCelsius = 36.4f, baselineDelta = 0.1f),
     val latestSleep: SleepSession? = null,
+    val latestSleepAnalysis: SleepAnalysis? = null,
     val lastSyncTimestamp: Long = System.currentTimeMillis(),
     val isSimulatedTelemetry: Boolean = false
 )
 
 /**
- * BLE Connection states.
+ * BLE Connection states including granular post-connect phases.
  */
 sealed class ConnectionState {
     data object Disconnected : ConnectionState()
     data object Scanning : ConnectionState()
     data class Connecting(val deviceName: String) : ConnectionState()
     data class Connected(val device: RingDevice) : ConnectionState()
+    data class Initializing(val currentStep: Int, val totalSteps: Int) : ConnectionState()
+    data class Syncing(val message: String) : ConnectionState()
+    data class Ready(val device: RingDevice) : ConnectionState()
     data class Error(val message: String) : ConnectionState()
+}
+
+/**
+ * Status of active on-demand manual measurements.
+ */
+sealed class ManualMeasurementState {
+    data object Idle : ManualMeasurementState()
+    data class Measuring(val metric: String, val progress: Float = 0f) : ManualMeasurementState()
+    data class Success(val metric: String, val displayValue: String, val timestamp: Long) : ManualMeasurementState()
+    data class Error(val metric: String, val message: String) : ManualMeasurementState()
 }
 
 /**

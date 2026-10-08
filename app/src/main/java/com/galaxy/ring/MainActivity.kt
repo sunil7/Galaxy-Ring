@@ -106,6 +106,11 @@ class MainActivity : ComponentActivity() {
                 permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
             }
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
 
         if (permissions.isNotEmpty()) {
             requestBlePermissionsLauncher.launch(permissions.toTypedArray())
