@@ -105,7 +105,15 @@ data class SleepAnalysis(
     val deltaPreviousNightScore: Int? = null,
     val deltaSevenDayAvgScore: Int? = null,
     val deltaPreviousNightDurationMin: Long? = null,
-    val deltaSevenDayAvgDurationMin: Long? = null
+    val deltaSevenDayAvgDurationMin: Long? = null,
+    val sleepConsistencyStdDevMinutes: Double? = null,
+    val sleepDebtHours: Float = 0f,
+    val stageQualityTips: List<String> = emptyList(),
+    val overnightMinHr: Int? = null,
+    val overnightAvgHr: Int? = null,
+    val overnightMaxHr: Int? = null,
+    val overnightMinSpo2: Float? = null,
+    val overnightAvgSpo2: Float? = null
 )
 
 /**

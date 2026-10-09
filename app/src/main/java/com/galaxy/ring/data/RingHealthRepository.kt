@@ -63,6 +63,19 @@ class RingHealthRepository(private val context: Context) {
         get() = prefs.getString("last_connected_name", "Galaxy Ring")
         set(value) = prefs.edit().putString("last_connected_name", value).apply()
 
+    // Sleep apnea screening self-reported checklist
+    var apneaLoudSnoring: Boolean
+        get() = prefs.getBoolean("apnea_loud_snoring", false)
+        set(value) = prefs.edit().putBoolean("apnea_loud_snoring", value).apply()
+
+    var apneaDaytimeSleepiness: Boolean
+        get() = prefs.getBoolean("apnea_daytime_sleepiness", false)
+        set(value) = prefs.edit().putBoolean("apnea_daytime_sleepiness", value).apply()
+
+    var apneaObservedPauses: Boolean
+        get() = prefs.getBoolean("apnea_observed_pauses", false)
+        set(value) = prefs.edit().putBoolean("apnea_observed_pauses", value).apply()
+
     suspend fun saveHeartRate(bpm: Int, timestamp: Long = System.currentTimeMillis(), isManual: Boolean = false) {
         val entity = HeartRateEntity(
             timestamp = timestamp,
@@ -149,11 +162,62 @@ class RingHealthRepository(private val context: Context) {
 
     fun getAllDailySteps(): Flow<List<DailyStepsEntity>> = stepsDao.getAllDailySteps()
 
+    fun getHeartRateBetween(startTime: Long, endTime: Long): Flow<List<HeartRateEntity>> =
+        hrDao.getSamplesBetween(startTime, endTime)
+
+    fun getSpo2Between(startTime: Long, endTime: Long): Flow<List<OxygenSaturationEntity>> =
+        spo2Dao.getSamplesBetween(startTime, endTime)
+
     fun getSleepForDate(dateStr: String): Flow<SleepSessionEntity?> = sleepDao.getSleepForDate(dateStr)
 
     fun getAllSleepSessions(): Flow<List<SleepSessionEntity>> = sleepDao.getAllSleepSessions()
 
     fun getRecentSleepSessions(limit: Int = 14): Flow<List<SleepSessionEntity>> = sleepDao.getRecentSleepSessions(limit)
+
+    fun getSleepSessionsInRange(startTime: Long, endTime: Long): Flow<List<SleepSessionEntity>> =
+        sleepDao.getSleepSessionsInRange(startTime, endTime)
+
+    suspend fun saveManualSleepSession(dateStr: String, startTime: Long, endTime: Long): Long {
+        val durationMinutes = ((endTime - startTime) / 60000L).coerceAtLeast(30L)
+        // Synthesize standard sleep stage distribution for manually logged sleep
+        val deepMins = (durationMinutes * 0.22).toLong()
+        val remMins = (durationMinutes * 0.24).toLong()
+        val awakeMins = (durationMinutes * 0.06).toLong()
+        val lightMins = durationMinutes - deepMins - remMins - awakeMins
+
+        val stages = listOf(
+            SleepStageRecord(SleepStage.LIGHT, startTime, startTime + (lightMins / 2) * 60000L),
+            SleepStageRecord(SleepStage.DEEP, startTime + (lightMins / 2) * 60000L, startTime + (lightMins / 2 + deepMins) * 60000L),
+            SleepStageRecord(SleepStage.REM, startTime + (lightMins / 2 + deepMins) * 60000L, startTime + (lightMins / 2 + deepMins + remMins) * 60000L),
+            SleepStageRecord(SleepStage.LIGHT, startTime + (lightMins / 2 + deepMins + remMins) * 60000L, endTime - awakeMins * 60000L),
+            SleepStageRecord(SleepStage.AWAKE, endTime - awakeMins * 60000L, endTime)
+        )
+        val session = SleepSession(
+            startTime = startTime,
+            endTime = endTime,
+            stages = stages
+        )
+        val analysis = SleepAnalyzer.analyze(session, (sleepTargetHours * 60).toLong())
+        // Delete any existing session for this date to avoid duplicate records
+        sleepDao.deleteForDate(dateStr)
+
+        val entity = SleepSessionEntity(
+            date = dateStr,
+            startTime = startTime,
+            endTime = endTime,
+            durationMinutes = durationMinutes,
+            deepMinutes = deepMins,
+            lightMinutes = lightMins,
+            remMinutes = remMins,
+            awakeMinutes = awakeMins,
+            sleepScore = analysis.sleepScore,
+            sleepEfficiency = analysis.sleepEfficiency,
+            stagesJson = ""
+        )
+        val id = sleepDao.insert(entity)
+        Log.d(tag, "Saved manual sleep override for date=$dateStr ($durationMinutes mins, score=${analysis.sleepScore})")
+        return id
+    }
 
     /**
      * Seeds past 7 days of realistic biometric data if Room database is empty on first run.

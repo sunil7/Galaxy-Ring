@@ -79,6 +79,10 @@ fun SettingsScreen(
     var checkHr by remember { mutableStateOf(repo.scheduleCheckHeartRate) }
     var checkSpo2 by remember { mutableStateOf(repo.scheduleCheckSpo2) }
 
+    var apneaSnoring by remember { mutableStateOf(repo.apneaLoudSnoring) }
+    var apneaSleepiness by remember { mutableStateOf(repo.apneaDaytimeSleepiness) }
+    var apneaPauses by remember { mutableStateOf(repo.apneaObservedPauses) }
+
     val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
     val isIgnoringBatteryOptimizations = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
         powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
@@ -249,6 +253,136 @@ fun SettingsScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
+                    }
+                }
+            }
+        }
+
+        // Sleep Breathing & Apnea Screening Self-Report Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(ElectricViolet.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.HealthAndSafety,
+                                contentDescription = null,
+                                tint = ElectricViolet,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Sleep Apnea Screening Symptoms",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Self-reported symptoms for overnight breathing risk heuristic",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "These indicators are used as weighted factors alongside your Galaxy Ring nocturnal SpO₂ and sleep continuity metrics in the Overnight Breathing Indicators screening card:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val next = !apneaSnoring
+                                apneaSnoring = next
+                                repo.apneaLoudSnoring = next
+                            },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = apneaSnoring,
+                            onCheckedChange = { next ->
+                                apneaSnoring = next
+                                repo.apneaLoudSnoring = next
+                            },
+                            colors = CheckboxDefaults.colors(checkedColor = CyberCyan)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Habitual or loud snoring",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val next = !apneaSleepiness
+                                apneaSleepiness = next
+                                repo.apneaDaytimeSleepiness = next
+                            },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = apneaSleepiness,
+                            onCheckedChange = { next ->
+                                apneaSleepiness = next
+                                repo.apneaDaytimeSleepiness = next
+                            },
+                            colors = CheckboxDefaults.colors(checkedColor = CyberCyan)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Excessive daytime tiredness / somnolence",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val next = !apneaPauses
+                                apneaPauses = next
+                                repo.apneaObservedPauses = next
+                            },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = apneaPauses,
+                            onCheckedChange = { next ->
+                                apneaPauses = next
+                                repo.apneaObservedPauses = next
+                            },
+                            colors = CheckboxDefaults.colors(checkedColor = CyberCyan)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Observed breathing pauses or gasping during sleep",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
             }

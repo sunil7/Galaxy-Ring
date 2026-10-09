@@ -17,6 +17,9 @@ interface HeartRateDao {
     @Query("SELECT * FROM heart_rate_records WHERE timestamp >= :startOfDay AND timestamp <= :endOfDay ORDER BY timestamp ASC")
     fun getSamplesForDay(startOfDay: Long, endOfDay: Long): Flow<List<HeartRateEntity>>
 
+    @Query("SELECT * FROM heart_rate_records WHERE timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp ASC")
+    fun getSamplesBetween(startTime: Long, endTime: Long): Flow<List<HeartRateEntity>>
+
     @Query("SELECT * FROM heart_rate_records ORDER BY timestamp DESC LIMIT 1")
     fun getLatestSample(): Flow<HeartRateEntity?>
 
@@ -34,6 +37,9 @@ interface OxygenSaturationDao {
 
     @Query("SELECT * FROM oxygen_saturation_records WHERE timestamp >= :startOfDay AND timestamp <= :endOfDay ORDER BY timestamp ASC")
     fun getSamplesForDay(startOfDay: Long, endOfDay: Long): Flow<List<OxygenSaturationEntity>>
+
+    @Query("SELECT * FROM oxygen_saturation_records WHERE timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp ASC")
+    fun getSamplesBetween(startTime: Long, endTime: Long): Flow<List<OxygenSaturationEntity>>
 
     @Query("SELECT * FROM oxygen_saturation_records ORDER BY timestamp DESC LIMIT 1")
     fun getLatestSample(): Flow<OxygenSaturationEntity?>
@@ -62,9 +68,15 @@ interface SleepDao {
     @Query("SELECT * FROM sleep_session_records WHERE date = :date ORDER BY endTime DESC LIMIT 1")
     fun getSleepForDate(date: String): Flow<SleepSessionEntity?>
 
+    @Query("SELECT * FROM sleep_session_records WHERE startTime >= :startTime AND endTime <= :endTime ORDER BY startTime ASC")
+    fun getSleepSessionsInRange(startTime: Long, endTime: Long): Flow<List<SleepSessionEntity>>
+
     @Query("SELECT * FROM sleep_session_records ORDER BY endTime DESC LIMIT :limit")
     fun getRecentSleepSessions(limit: Int = 14): Flow<List<SleepSessionEntity>>
 
     @Query("SELECT * FROM sleep_session_records ORDER BY endTime DESC")
     fun getAllSleepSessions(): Flow<List<SleepSessionEntity>>
+
+    @Query("DELETE FROM sleep_session_records WHERE date = :date")
+    suspend fun deleteForDate(date: String)
 }
