@@ -67,6 +67,10 @@ class HealthConnectWriter(private val context: Context) {
     }
 
     suspend fun writeHeartRateSample(sample: HeartRateSample, isManual: Boolean = false): Boolean {
+        if (sample.bpm !in 30..250) {
+            Log.w(tag, "Skipping invalid HR sample: ${sample.bpm} bpm (must be in 30..250)")
+            return false
+        }
         val client = healthConnectClient ?: return false
         return try {
             val sampleInstant = Instant.ofEpochMilli(sample.timestamp)
@@ -98,6 +102,10 @@ class HealthConnectWriter(private val context: Context) {
     }
 
     suspend fun writeOxygenSaturationSample(sample: OxygenSaturationSample, isManual: Boolean = false): Boolean {
+        if (sample.percentage !in 50f..100f) {
+            Log.w(tag, "Skipping invalid SpO2 sample: ${sample.percentage}%")
+            return false
+        }
         val client = healthConnectClient ?: return false
         return try {
             val sampleInstant = Instant.ofEpochMilli(sample.timestamp)
@@ -122,6 +130,10 @@ class HealthConnectWriter(private val context: Context) {
     }
 
     suspend fun writeSteps(stepData: StepData): Boolean {
+        if (stepData.totalSteps <= 0) {
+            Log.w(tag, "Skipping invalid steps count: ${stepData.totalSteps} (must be > 0)")
+            return false
+        }
         val client = healthConnectClient ?: return false
         return try {
             val now = Instant.ofEpochMilli(stepData.timestamp)

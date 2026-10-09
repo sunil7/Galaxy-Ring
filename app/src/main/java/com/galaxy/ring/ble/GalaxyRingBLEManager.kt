@@ -212,8 +212,12 @@ class GalaxyRingBLEManager(
         val hexString = data.joinToString(" ") { "%02X".format(it) }
         Log.d(tag, "0xB003 Notification received (${data.size} bytes): $hexString")
 
-        // Complete any pending command response awaiter
-        pendingResponse?.complete(data)
+        // Complete any pending command response awaiter and log RX
+        val pending = pendingResponse
+        if (pending != null && pending.isActive) {
+            Log.i(tag, "RX completed deferred (${data.size} bytes): $hexString")
+            pending.complete(data)
+        }
 
         scope.launch {
             _rawNotifications.emit(data)
@@ -335,6 +339,9 @@ class GalaxyRingBLEManager(
         }
 
         val frame = buildCommandFrame(payload)
+        val txHex = frame.joinToString(" ") { "%02X".format(it) }
+        Log.i(tag, "TX (${frame.size} bytes): $txHex")
+
         val deferred = CompletableDeferred<ByteArray>()
         pendingResponse = deferred
 
@@ -352,7 +359,13 @@ class GalaxyRingBLEManager(
         val result = withTimeoutOrNull(timeoutMs) {
             deferred.await()
         }
+        if (result != null) {
+            val rxHex = result.joinToString(" ") { "%02X".format(it) }
+            Log.i(tag, "RX completed pending response (${result.size} bytes): $rxHex")
+        } else {
+            Log.d(tag, "No immediate notify response received within ${timeoutMs}ms; write accepted by stack")
+        }
         pendingResponse = null
-        return result != null || true // Write was delivered; ring may send asynchronous notifications
+        return true // Write was delivered; ring may send asynchronous notifications
     }
 }

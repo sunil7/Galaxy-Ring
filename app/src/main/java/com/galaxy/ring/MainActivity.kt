@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.lifecycleScope
 import com.galaxy.ring.health.PermissionsRationaleActivity
+import com.galaxy.ring.sync.RingScheduledService
 import com.galaxy.ring.ui.screens.MainScreen
 import com.galaxy.ring.ui.theme.GalaxyRingTheme
 import kotlinx.coroutines.launch

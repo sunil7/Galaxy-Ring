@@ -40,7 +40,7 @@ class RingHealthRepository(private val context: Context) {
 
     // Scheduled checks preferences
     var isScheduleEnabled: Boolean
-        get() = prefs.getBoolean("schedule_enabled", true)
+        get() = prefs.getBoolean("schedule_enabled", false)
         set(value) = prefs.edit().putBoolean("schedule_enabled", value).apply()
 
     var scheduleIntervalMinutes: Int

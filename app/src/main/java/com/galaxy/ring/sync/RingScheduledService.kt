@@ -1,5 +1,6 @@
 package com.galaxy.ring.sync
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,12 +8,14 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.galaxy.ring.GalaxyRingApp
 import com.galaxy.ring.MainActivity
 import com.galaxy.ring.data.ConnectionState
@@ -42,15 +45,21 @@ class RingScheduledService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(tag, "RingScheduledService starting foreground monitoring...")
 
-        val notification = buildPersistentNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            val notification = buildPersistentNotification()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to startForeground for RingScheduledService: ${e.message}", e)
+            stopSelf()
+            return START_NOT_STICKY
         }
 
         startScheduledLoop()
@@ -179,6 +188,20 @@ class RingScheduledService : Service() {
         private const val NOTIFICATION_ID = 4096
 
         fun start(context: Context) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val hasBtConnect = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.BLUETOOTH_CONNECT
+                ) == PackageManager.PERMISSION_GRANTED
+                val hasBtScan = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.BLUETOOTH_SCAN
+                ) == PackageManager.PERMISSION_GRANTED
+                if (!hasBtConnect && !hasBtScan) {
+                    Log.w("GalaxyRingSync", "Cannot start RingScheduledService: Bluetooth permissions not granted")
+                    return
+                }
+            }
             val intent = Intent(context, RingScheduledService::class.java)
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

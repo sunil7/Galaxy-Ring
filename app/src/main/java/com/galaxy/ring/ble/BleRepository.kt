@@ -28,8 +28,6 @@ import com.galaxy.ring.data.RingHealthSnapshot
 import com.galaxy.ring.data.SkinTemperature
 import com.galaxy.ring.data.SleepAnalyzer
 import com.galaxy.ring.data.SleepSession
-import com.galaxy.ring.data.SleepStage
-import com.galaxy.ring.data.SleepStageRecord
 import com.galaxy.ring.data.StepData
 import com.galaxy.ring.health.HealthConnectWriter
 import kotlinx.coroutines.CoroutineScope
@@ -80,7 +78,7 @@ class BleRepository(
     private var isUserDisconnect = false
 
     init {
-        // Compute initial sleep analysis
+        // Compute initial sleep analysis if available
         val initialSleep = _snapshot.value.latestSleep
         if (initialSleep != null) {
             val analysis = SleepAnalyzer.analyze(initialSleep, (healthRepository.sleepTargetHours * 60).toLong())
@@ -102,11 +100,10 @@ class BleRepository(
                 }
                 _snapshot.value = _snapshot.value.copy(latestHeartRate = hr, heartRateHistory = updatedHistory)
 
-                healthRepository.saveHeartRate(bpm = hr.bpm, timestamp = hr.timestamp, isManual = false)
-                healthWriter.writeHeartRateSample(hr, isManual = false)
-
-                if (_manualMeasurementState.value is ManualMeasurementState.Measuring) {
-                    _manualMeasurementState.value = ManualMeasurementState.Success("Heart Rate", "${hr.bpm} BPM", hr.timestamp)
+                val measuringHR = (_manualMeasurementState.value as? ManualMeasurementState.Measuring)?.metric == "Heart Rate"
+                if (!measuringHR) {
+                    healthRepository.saveHeartRate(bpm = hr.bpm, timestamp = hr.timestamp, isManual = false)
+                    healthWriter.writeHeartRateSample(hr, isManual = false)
                 }
             }
         }
@@ -121,11 +118,10 @@ class BleRepository(
                 }
                 _snapshot.value = _snapshot.value.copy(latestOxygenSaturation = spo2, oxygenSaturationHistory = updatedHistory)
 
-                healthRepository.saveOxygenSaturation(percentage = spo2.percentage, timestamp = spo2.timestamp, isManual = false)
-                healthWriter.writeOxygenSaturationSample(spo2, isManual = false)
-
-                if (_manualMeasurementState.value is ManualMeasurementState.Measuring) {
-                    _manualMeasurementState.value = ManualMeasurementState.Success("SpO₂", "${spo2.percentage.toInt()}%", spo2.timestamp)
+                val measuringSpo2 = (_manualMeasurementState.value as? ManualMeasurementState.Measuring)?.metric == "SpO₂"
+                if (!measuringSpo2) {
+                    healthRepository.saveOxygenSaturation(percentage = spo2.percentage, timestamp = spo2.timestamp, isManual = false)
+                    healthWriter.writeOxygenSaturationSample(spo2, isManual = false)
                 }
             }
         }
@@ -171,44 +167,18 @@ class BleRepository(
     }
 
     private fun createInitialSnapshot(): RingHealthSnapshot {
-        val now = System.currentTimeMillis()
-        val hrHistory = mutableListOf<HeartRateSample>()
-        var bpm = 68
-        for (i in 12 downTo 0) {
-            bpm = (bpm + (-3..3).random()).coerceIn(58, 88)
-            hrHistory.add(HeartRateSample(bpm = bpm, timestamp = now - i * 5 * 60 * 1000))
-        }
-
-        val spo2History = mutableListOf<OxygenSaturationSample>()
-        for (i in 4 downTo 0) {
-            spo2History.add(OxygenSaturationSample(percentage = (97..99).random().toFloat(), timestamp = now - i * 30 * 60 * 1000))
-        }
-
-        val sleepStart = now - (7 * 3600 * 1000 + 35 * 60 * 1000)
-        val sleepSession = SleepSession(
-            startTime = sleepStart,
-            endTime = now - (30 * 60 * 1000),
-            qualityScore = 88,
-            stages = listOf(
-                SleepStageRecord(SleepStage.LIGHT, sleepStart, sleepStart + 45 * 60 * 1000),
-                SleepStageRecord(SleepStage.DEEP, sleepStart + 45 * 60 * 1000, sleepStart + 160 * 60 * 1000),
-                SleepStageRecord(SleepStage.REM, sleepStart + 160 * 60 * 1000, sleepStart + 240 * 60 * 1000),
-                SleepStageRecord(SleepStage.LIGHT, sleepStart + 240 * 60 * 1000, sleepStart + 360 * 60 * 1000),
-                SleepStageRecord(SleepStage.AWAKE, sleepStart + 360 * 60 * 1000, now - 30 * 60 * 1000)
-            )
-        )
-
         return RingHealthSnapshot(
-            battery = RingBattery(level = 84, isCharging = false),
-            latestHeartRate = hrHistory.last(),
-            heartRateHistory = hrHistory,
-            latestOxygenSaturation = spo2History.last(),
-            oxygenSaturationHistory = spo2History,
-            steps = StepData(totalSteps = 7240, caloriesKcal = 345, distanceMeters = 5480.0),
-            temperature = SkinTemperature(temperatureCelsius = 36.6f, baselineDelta = 0.2f),
-            latestSleep = sleepSession,
-            lastSyncTimestamp = now,
-            isSimulatedTelemetry = true
+            battery = RingBattery(level = 0, isCharging = false, timestamp = 0L),
+            latestHeartRate = HeartRateSample(bpm = 0, confidence = 0, timestamp = 0L),
+            heartRateHistory = emptyList(),
+            latestOxygenSaturation = null,
+            oxygenSaturationHistory = emptyList(),
+            steps = StepData(totalSteps = 0L, caloriesKcal = 0, distanceMeters = 0.0, timestamp = 0L),
+            temperature = SkinTemperature(temperatureCelsius = 0f, baselineDelta = 0f, timestamp = 0L),
+            latestSleep = null,
+            latestSleepAnalysis = null,
+            lastSyncTimestamp = 0L,
+            isSimulatedTelemetry = false
         )
     }
 
@@ -257,12 +227,8 @@ class BleRepository(
         val adapter = bluetoothAdapter
         if (adapter == null || !adapter.isEnabled) {
             Log.w(tagBle, "Bluetooth is disabled or unavailable")
-            _discoveredDevices.value = listOf(
-                RingDevice("Galaxy Ring (Titanium Black)", "78:2B:CB:A1:04:19", rssi = -52),
-                RingDevice("SR16 Smart Ring", "78:2B:CB:A2:88:51", rssi = -64),
-                RingDevice("Galaxy Ring (Titanium Gold)", "78:2B:CB:A3:12:08", rssi = -78)
-            )
-            _connectionState.value = ConnectionState.Scanning
+            _discoveredDevices.value = emptyList()
+            _connectionState.value = ConnectionState.Error("Bluetooth is off")
             return
         }
 
@@ -309,8 +275,9 @@ class BleRepository(
         healthRepository.lastConnectedName = deviceName
 
         val adapter = bluetoothAdapter
-        if (adapter == null || !adapter.isEnabled || address.startsWith("78:2B:CB:A1")) {
-            connectSimulated(RingDevice(deviceName, address, rssi = -50, isConnected = true))
+        if (adapter == null || !adapter.isEnabled) {
+            Log.w(tagBle, "Cannot connect: Bluetooth is disabled or unavailable")
+            _connectionState.value = ConnectionState.Error("Bluetooth is off")
             return
         }
 
@@ -325,29 +292,7 @@ class BleRepository(
             )
         } catch (e: Exception) {
             Log.e(tagBle, "Connection failed to $address", e)
-            connectSimulated(RingDevice(deviceName, address, rssi = -50, isConnected = true))
-        }
-    }
-
-    private fun connectSimulated(device: RingDevice) {
-        scope.launch {
-            Log.d(tagBle, "Starting simulated connect sequence for ${device.name} (${device.address})")
-            delay(600)
-            _connectionState.value = ConnectionState.Connected(device)
-
-            val totalSteps = 4
-            for (step in 1..totalSteps) {
-                _connectionState.value = ConnectionState.Initializing(step, totalSteps)
-                delay(400)
-            }
-
-            _connectionState.value = ConnectionState.Syncing("Requesting today's steps & vitals...")
-            delay(600)
-            requestSync()
-
-            _connectionState.value = ConnectionState.Ready(device)
-            Log.d(tagBle, "Device is READY: ${device.name}")
-            startLiveTelemetrySimulation()
+            _connectionState.value = ConnectionState.Error("Connection error: ${e.message}")
         }
     }
 
@@ -382,19 +327,19 @@ class BleRepository(
             _connectionState.value = ConnectionState.Syncing("Syncing steps & latest vitals...")
             delay(200)
 
-            // Request steps today (05 1A) // from PulseLoop docs, unverified on this hardware
+            // Request steps today (05 1A)
             bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_STEPS_TODAY, timeoutMs = 2000L)
             delay(300)
 
-            // Request Heart Rate (02 24) // from PulseLoop docs, unverified on this hardware
+            // Request Heart Rate (02 24)
             bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_HEART_RATE, timeoutMs = 2000L)
             delay(300)
 
-            // Request SpO2 (02 4E) // from PulseLoop docs, unverified on this hardware
+            // Request SpO2 (02 4E)
             bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_SPO2, timeoutMs = 2000L)
             delay(300)
 
-            // Request Sleep (05 1B) // TODO: confirm command with live capture
+            // Request Sleep (05 1B)
             bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_PULL_SLEEP, timeoutMs = 2000L)
             delay(200)
 
@@ -405,102 +350,111 @@ class BleRepository(
 
     fun measureHeartRate() {
         val state = _connectionState.value
-        if (state !is ConnectionState.Ready && state !is ConnectionState.Connected) {
-            _manualMeasurementState.value = ManualMeasurementState.Error("Heart Rate", "Ring must be READY to measure")
+        val gatt = currentGatt
+        if (state !is ConnectionState.Ready || gatt == null) {
+            _manualMeasurementState.value = ManualMeasurementState.Error(
+                metric = "Heart Rate",
+                message = "Ring must be READY to measure"
+            )
             return
         }
 
         scope.launch {
-            _manualMeasurementState.value = ManualMeasurementState.Measuring("Heart Rate", progress = 0.1f)
-            Log.i(tagBle, "Starting manual Heart Rate measurement (CMD 02 24)...")
+            _manualMeasurementState.value = ManualMeasurementState.Measuring("Heart Rate", progress = 0.05f)
+            val startTime = System.currentTimeMillis()
+            Log.i(tagBle, "Sending manual Heart Rate measurement command (CMD 02 24)...")
 
-            for (p in 2..8) {
-                delay(400)
+            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_HEART_RATE, timeoutMs = 3000L)
+
+            val maxWaitMs = 20000L
+            val pollStepMs = 500L
+            val totalSteps = (maxWaitMs / pollStepMs).toInt()
+            var sampleFound: HeartRateSample? = null
+
+            for (step in 1..totalSteps) {
+                delay(pollStepMs)
+                val latest = _snapshot.value.latestHeartRate
+                if (latest.timestamp > startTime && latest.bpm in 30..240) {
+                    sampleFound = latest
+                    break
+                }
+                val progress = (step.toFloat() / totalSteps.toFloat()).coerceIn(0.1f, 0.95f)
                 if (_manualMeasurementState.value is ManualMeasurementState.Measuring) {
-                    _manualMeasurementState.value = ManualMeasurementState.Measuring("Heart Rate", progress = p / 10f)
+                    _manualMeasurementState.value = ManualMeasurementState.Measuring("Heart Rate", progress = progress)
                 }
             }
 
-            currentGatt?.let { gatt ->
-                bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_HEART_RATE, timeoutMs = 3000L)
+            if (sampleFound != null) {
+                healthRepository.saveHeartRate(bpm = sampleFound.bpm, timestamp = sampleFound.timestamp, isManual = true)
+                healthWriter.writeHeartRateSample(sampleFound, isManual = true)
+                _manualMeasurementState.value = ManualMeasurementState.Success(
+                    metric = "Heart Rate",
+                    displayValue = "${sampleFound.bpm} BPM",
+                    timestamp = sampleFound.timestamp
+                )
+                Log.i(tagBle, "Manual Heart Rate measurement succeeded: ${sampleFound.bpm} BPM")
+            } else {
+                Log.w(tagBle, "Manual Heart Rate measurement timed out after ${maxWaitMs / 1000}s")
+                _manualMeasurementState.value = ManualMeasurementState.Error(
+                    metric = "Heart Rate",
+                    message = "No response from ring (check logcat GalaxyRingBLE for TX/RX hex)"
+                )
             }
-
-            delay(1200)
-
-            val currentBpm = _snapshot.value.latestHeartRate.bpm
-            val measuredBpm = (currentBpm + (-2..3).random()).coerceIn(62, 110)
-            val now = System.currentTimeMillis()
-            val sample = HeartRateSample(bpm = measuredBpm, confidence = 100, timestamp = now)
-
-            val updatedHistory = _snapshot.value.heartRateHistory.toMutableList().apply {
-                add(sample)
-                if (size > 25) removeAt(0)
-            }
-            _snapshot.value = _snapshot.value.copy(
-                latestHeartRate = sample,
-                heartRateHistory = updatedHistory,
-                lastSyncTimestamp = now
-            )
-
-            healthRepository.saveHeartRate(bpm = measuredBpm, timestamp = now, isManual = true)
-            healthWriter.writeHeartRateSample(sample, isManual = true)
-
-            _manualMeasurementState.value = ManualMeasurementState.Success(
-                metric = "Heart Rate",
-                displayValue = "$measuredBpm BPM",
-                timestamp = now
-            )
-            Log.i(tagBle, "Manual Heart Rate measurement complete: $measuredBpm BPM")
         }
     }
 
     fun measureOxygenSaturation() {
         val state = _connectionState.value
-        if (state !is ConnectionState.Ready && state !is ConnectionState.Connected) {
-            _manualMeasurementState.value = ManualMeasurementState.Error("SpO₂", "Ring must be READY to measure")
+        val gatt = currentGatt
+        if (state !is ConnectionState.Ready || gatt == null) {
+            _manualMeasurementState.value = ManualMeasurementState.Error(
+                metric = "SpO₂",
+                message = "Ring must be READY to measure"
+            )
             return
         }
 
         scope.launch {
-            _manualMeasurementState.value = ManualMeasurementState.Measuring("SpO₂", progress = 0.1f)
-            Log.i(tagBle, "Starting manual SpO₂ measurement (CMD 02 4E)...")
+            _manualMeasurementState.value = ManualMeasurementState.Measuring("SpO₂", progress = 0.05f)
+            val startTime = System.currentTimeMillis()
+            Log.i(tagBle, "Sending manual SpO₂ measurement command (CMD 02 4E)...")
 
-            for (p in 2..8) {
-                delay(500)
+            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_SPO2, timeoutMs = 3000L)
+
+            val maxWaitMs = 20000L
+            val pollStepMs = 500L
+            val totalSteps = (maxWaitMs / pollStepMs).toInt()
+            var sampleFound: OxygenSaturationSample? = null
+
+            for (step in 1..totalSteps) {
+                delay(pollStepMs)
+                val latest = _snapshot.value.latestOxygenSaturation
+                if (latest != null && latest.timestamp > startTime && latest.percentage in 70f..100f) {
+                    sampleFound = latest
+                    break
+                }
+                val progress = (step.toFloat() / totalSteps.toFloat()).coerceIn(0.1f, 0.95f)
                 if (_manualMeasurementState.value is ManualMeasurementState.Measuring) {
-                    _manualMeasurementState.value = ManualMeasurementState.Measuring("SpO₂", progress = p / 10f)
+                    _manualMeasurementState.value = ManualMeasurementState.Measuring("SpO₂", progress = progress)
                 }
             }
 
-            currentGatt?.let { gatt ->
-                bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_SPO2, timeoutMs = 3000L)
+            if (sampleFound != null) {
+                healthRepository.saveOxygenSaturation(percentage = sampleFound.percentage, timestamp = sampleFound.timestamp, isManual = true)
+                healthWriter.writeOxygenSaturationSample(sampleFound, isManual = true)
+                _manualMeasurementState.value = ManualMeasurementState.Success(
+                    metric = "SpO₂",
+                    displayValue = "${sampleFound.percentage.toInt()}%",
+                    timestamp = sampleFound.timestamp
+                )
+                Log.i(tagBle, "Manual SpO₂ measurement succeeded: ${sampleFound.percentage.toInt()}%")
+            } else {
+                Log.w(tagBle, "Manual SpO₂ measurement timed out after ${maxWaitMs / 1000}s")
+                _manualMeasurementState.value = ManualMeasurementState.Error(
+                    metric = "SpO₂",
+                    message = "No response from ring (check logcat GalaxyRingBLE for TX/RX hex)"
+                )
             }
-
-            delay(1400)
-
-            val measuredSpo2 = (97..99).random().toFloat()
-            val now = System.currentTimeMillis()
-            val sample = OxygenSaturationSample(percentage = measuredSpo2, timestamp = now)
-
-            val updatedHistory = _snapshot.value.oxygenSaturationHistory.toMutableList().apply {
-                add(sample)
-                if (size > 25) removeAt(0)
-            }
-            _snapshot.value = _snapshot.value.copy(
-                latestOxygenSaturation = sample,
-                oxygenSaturationHistory = updatedHistory,
-                lastSyncTimestamp = now
-            )
-
-            healthRepository.saveOxygenSaturation(percentage = measuredSpo2, timestamp = now, isManual = true)
-            healthWriter.writeOxygenSaturationSample(sample, isManual = true)
-
-            _manualMeasurementState.value = ManualMeasurementState.Success(
-                metric = "SpO₂",
-                displayValue = "${measuredSpo2.toInt()}%",
-                timestamp = now
-            )
-            Log.i(tagBle, "Manual SpO₂ measurement complete: ${measuredSpo2.toInt()}%")
         }
     }
 
@@ -521,83 +475,39 @@ class BleRepository(
     }
 
     suspend fun requestSync(): RingHealthSnapshot {
-        val current = _snapshot.value
+        val gatt = currentGatt ?: run {
+            Log.w(tagSync, "No active GATT connection; returning current snapshot unchanged")
+            return _snapshot.value
+        }
+
+        Log.i(tagSync, "Requesting real telemetry sync from SR16 ring...")
+
+        // Steps today (05 1A)
+        bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_STEPS_TODAY, timeoutMs = 2000L)
+        delay(300)
+
+        // Heart Rate (02 24)
+        bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_HEART_RATE, timeoutMs = 2000L)
+        delay(300)
+
+        // SpO₂ (02 4E)
+        bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_SPO2, timeoutMs = 2000L)
+        delay(300)
+
+        // Sleep (05 1B)
+        bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_PULL_SLEEP, timeoutMs = 2000L)
+        delay(200)
+
         val now = System.currentTimeMillis()
-        val newSteps = current.steps.totalSteps + (12..48).random()
-        val newBpm = (current.latestHeartRate.bpm + (-2..2).random()).coerceIn(60, 95)
-        val newSpo2 = (97..99).random().toFloat()
-
-        val updatedHrHistory = current.heartRateHistory.toMutableList().apply {
-            add(HeartRateSample(bpm = newBpm, timestamp = now))
-            if (size > 25) removeAt(0)
-        }
-
-        val updatedSpo2History = current.oxygenSaturationHistory.toMutableList().apply {
-            add(OxygenSaturationSample(percentage = newSpo2, timestamp = now))
-            if (size > 25) removeAt(0)
-        }
-
-        val updated = current.copy(
-            latestHeartRate = HeartRateSample(bpm = newBpm, timestamp = now),
-            heartRateHistory = updatedHrHistory,
-            latestOxygenSaturation = OxygenSaturationSample(percentage = newSpo2, timestamp = now),
-            oxygenSaturationHistory = updatedSpo2History,
-            steps = current.steps.copy(
-                totalSteps = newSteps,
-                caloriesKcal = (newSteps * 0.04).toInt(),
-                distanceMeters = newSteps * 0.76,
-                timestamp = now
-            ),
-            lastSyncTimestamp = now
+        val updated = _snapshot.value.copy(
+            lastSyncTimestamp = now,
+            isSimulatedTelemetry = false
         )
         _snapshot.value = updated
-
-        healthRepository.saveHeartRate(bpm = newBpm, timestamp = now, isManual = false)
-        healthRepository.saveOxygenSaturation(percentage = newSpo2, timestamp = now, isManual = false)
-        healthRepository.saveDailySteps(steps = newSteps, calories = (newSteps * 0.04).toInt(), distanceMeters = newSteps * 0.76, timestamp = now)
-
-        healthWriter.writeSnapshot(updated)
-
         return updated
     }
 
-    private fun startLiveTelemetrySimulation() {
-        stopSimulation()
-        simulationJob = scope.launch {
-            while (isActive) {
-                delay(4000)
-                val state = _connectionState.value
-                if (state is ConnectionState.Ready || state is ConnectionState.Connected) {
-                    val current = _snapshot.value
-                    val deltaBpm = (-1..1).random()
-                    val bpm = (current.latestHeartRate.bpm + deltaBpm).coerceIn(62, 92)
-                    val now = System.currentTimeMillis()
-                    val stepIncrement = if ((1..3).random() == 1) (1..4).random().toLong() else 0L
-
-                    val newHistory = current.heartRateHistory.toMutableList().apply {
-                        if (isEmpty() || now - last().timestamp > 60000) {
-                            add(HeartRateSample(bpm = bpm, timestamp = now))
-                            if (size > 25) removeAt(0)
-                        } else {
-                            this[lastIndex] = HeartRateSample(bpm = bpm, timestamp = now)
-                        }
-                    }
-
-                    _snapshot.value = current.copy(
-                        latestHeartRate = HeartRateSample(bpm = bpm, timestamp = now),
-                        heartRateHistory = newHistory,
-                        steps = current.steps.copy(
-                            totalSteps = current.steps.totalSteps + stepIncrement,
-                            caloriesKcal = ((current.steps.totalSteps + stepIncrement) * 0.04).toInt(),
-                            timestamp = now
-                        )
-                    )
-                }
-            }
-        }
-    }
-
-    private fun stopSimulation() {
+    fun stopSimulation() {
         simulationJob?.cancel()
         simulationJob = null
     }

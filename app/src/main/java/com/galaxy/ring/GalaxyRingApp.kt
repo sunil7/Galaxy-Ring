@@ -1,10 +1,10 @@
 package com.galaxy.ring
 
 import android.app.Application
+import android.util.Log
 import com.galaxy.ring.ble.BleRepository
 import com.galaxy.ring.data.RingHealthRepository
 import com.galaxy.ring.health.HealthConnectWriter
-import com.galaxy.ring.sync.RingScheduledService
 import com.galaxy.ring.sync.SyncWorker
 
 class GalaxyRingApp : Application() {
@@ -22,24 +22,31 @@ class GalaxyRingApp : Application() {
         super.onCreate()
         instance = this
 
-        healthRepository = RingHealthRepository(this)
-        healthConnectWriter = HealthConnectWriter(this)
-        bleRepository = BleRepository(this, healthRepository, healthConnectWriter)
+        val tag = "GalaxyRingApp"
 
-        // Start background scheduled monitoring service if enabled
         try {
-            if (healthRepository.isScheduleEnabled) {
-                RingScheduledService.start(this)
-            }
+            healthRepository = RingHealthRepository(this)
         } catch (e: Exception) {
-            // Service safety
+            Log.e(tag, "Failed to initialize RingHealthRepository", e)
+        }
+
+        try {
+            healthConnectWriter = HealthConnectWriter(this)
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to initialize HealthConnectWriter", e)
+        }
+
+        try {
+            bleRepository = BleRepository(this, healthRepository, healthConnectWriter)
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to initialize BleRepository", e)
         }
 
         // Periodic WorkManager backup sync to Health Connect
         try {
             SyncWorker.schedulePeriodicSync(this)
         } catch (e: Exception) {
-            // WorkManager init safety
+            Log.e(tag, "Failed to schedule WorkManager periodic sync", e)
         }
     }
 

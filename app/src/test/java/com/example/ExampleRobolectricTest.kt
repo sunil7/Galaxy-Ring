@@ -2,9 +2,11 @@ package com.example
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.galaxy.ring.MainActivity
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
@@ -17,5 +19,11 @@ class ExampleRobolectricTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val appName = context.getString(R.string.app_name)
     assertEquals("Galaxy Ring", appName)
+  }
+
+  @Test
+  fun `launch MainActivity`() {
+    val controller = Robolectric.buildActivity(MainActivity::class.java)
+    controller.setup()
   }
 }
