@@ -163,9 +163,12 @@ fun MainScreen(
                 connectionState = connectionState,
                 snapshot = snapshot,
                 onScanClick = {
-                    onRequestBlePermissions()
-                    bleRepo.startScan()
-                    showScanSheet = true
+                    if (!bleRepo.hasBlePermissions()) {
+                        onRequestBlePermissions()
+                    } else {
+                        bleRepo.startScan()
+                        showScanSheet = true
+                    }
                 },
                 onAdminClick = { showAdminScreen = true }
             )
@@ -228,9 +231,12 @@ fun MainScreen(
                             }
                         },
                         onConnectClick = {
-                            onRequestBlePermissions()
-                            bleRepo.startScan()
-                            showScanSheet = true
+                            if (!bleRepo.hasBlePermissions()) {
+                                onRequestBlePermissions()
+                            } else {
+                                bleRepo.startScan()
+                                showScanSheet = true
+                            }
                         },
                         onMeasureHeartRate = {
                             bleRepo.measureHeartRate()
@@ -292,11 +298,19 @@ fun MainScreen(
                 isScanning = connectionState is ConnectionState.Scanning,
                 devices = discoveredDevices,
                 onDeviceSelect = { device ->
-                    bleRepo.connect(device.address, device.name)
-                    showScanSheet = false
+                    if (!bleRepo.hasBlePermissions()) {
+                        onRequestBlePermissions()
+                    } else {
+                        bleRepo.connect(device.address, device.name, onRequestPermissionsNeeded = onRequestBlePermissions)
+                        showScanSheet = false
+                    }
                 },
                 onRefresh = {
-                    bleRepo.startScan()
+                    if (!bleRepo.hasBlePermissions()) {
+                        onRequestBlePermissions()
+                    } else {
+                        bleRepo.startScan(onRequestPermissionsNeeded = onRequestBlePermissions)
+                    }
                 }
             )
         }
@@ -333,7 +347,10 @@ fun DeviceDashboard(
 
         // 1. Connection Status Banner
         item {
-            ConnectionStatusBanner(connectionState = connectionState)
+            ConnectionStatusBanner(
+                connectionState = connectionState,
+                onOpenAdmin = onOpenAdmin
+            )
         }
 
         // 2. Interactive Ring Hero Card
@@ -421,14 +438,29 @@ fun DeviceDashboard(
 }
 
 @Composable
-fun ConnectionStatusBanner(connectionState: ConnectionState) {
+fun ConnectionStatusBanner(
+    connectionState: ConnectionState,
+    onOpenAdmin: () -> Unit = {}
+) {
+    val isZeroRxReady = connectionState is ConnectionState.Ready && connectionState.rxCountSinceConnect == 0
     val (bgColor, textColor, icon, label) = when (connectionState) {
-        is ConnectionState.Ready -> Quadruple(
-            NeonEmerald.copy(alpha = 0.15f),
-            NeonEmerald,
-            Icons.Default.CheckCircle,
-            "Ready – Active Telemetry & Sensors"
-        )
+        is ConnectionState.Ready -> {
+            if (connectionState.rxCountSinceConnect == 0) {
+                Quadruple(
+                    Color(0xFFF59E0B).copy(alpha = 0.15f),
+                    Color(0xFFF59E0B),
+                    Icons.Default.Error,
+                    "Connected but 0 RX from ring. Commands may be ignored. Open Admin logs."
+                )
+            } else {
+                Quadruple(
+                    NeonEmerald.copy(alpha = 0.15f),
+                    NeonEmerald,
+                    Icons.Default.CheckCircle,
+                    "Ready – Active Telemetry (${connectionState.rxCountSinceConnect} RX received)"
+                )
+            }
+        }
         is ConnectionState.Initializing -> Quadruple(
             CyberCyan.copy(alpha = 0.15f),
             CyberCyan,
@@ -474,7 +506,9 @@ fun ConnectionStatusBanner(connectionState: ConnectionState) {
     }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = isZeroRxReady) { onOpenAdmin() },
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = bgColor)
     ) {

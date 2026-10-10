@@ -8,11 +8,13 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -98,6 +100,8 @@ fun AdminScreen(
     val connectionState by bleRepo.connectionState.collectAsState()
     val measurementState by bleRepo.manualMeasurementState.collectAsState()
     val allLogs by AppLog.logsFlow.collectAsState()
+    val rxCountSinceConnect by bleManager.rxCountFlow.collectAsState()
+    val allTxRecords by AppLog.txFlow.collectAsState()
 
     var selectedFilter by remember { mutableStateOf("All") } // "All", "BLE", "Sync", "Error"
 
@@ -241,6 +245,63 @@ fun AdminScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "RX Count Since Connect:",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = if (rxCountSinceConnect > 0) "$rxCountSinceConnect frames" else "0 (No response yet)",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (rxCountSinceConnect > 0) NeonEmerald else Color(0xFFF59E0B)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Negotiated MTU:",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "${AppLog.mtuNegotiated} bytes",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Working Frame Variant:",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = bleManager.workingVariantName ?: "Testing variants (0 RX)",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (bleManager.workingVariantName != null) NeonEmerald else CyberCyan
+                            )
+                        }
                     }
                 }
             }
@@ -277,9 +338,34 @@ fun AdminScreen(
                             uuid = "0000B003-0000-1000-8000-00805F9B34FB"
                         )
                         GattRow(
-                            label = "CCCD 0xB003 enabled",
+                            label = "Service 0xFF00 found",
+                            found = bleManager.foundService0xFF00,
+                            uuid = "0000FF00 (Chars: 0xFF01, 0xFF02, 0xFF03)"
+                        )
+                        GattRow(
+                            label = "Write 0xFF01 found",
+                            found = bleManager.foundChar0xFF01,
+                            uuid = "0000FF01 (Fallback command write path)"
+                        )
+                        GattRow(
+                            label = "Notify 0xFF02 / 0xFF03 found",
+                            found = bleManager.foundChar0xFF02 || bleManager.foundChar0xFF03,
+                            uuid = "0000FF02 / 0000FF03"
+                        )
+                        GattRow(
+                            label = "Service 0x0BC0 found",
+                            found = bleManager.foundService0x0BC0,
+                            uuid = "00000BC0 (Chars: 0x0BC1, 0x0BC2)"
+                        )
+                        GattRow(
+                            label = "Notify 0x0BC1 / 0x0BC2 found",
+                            found = bleManager.foundChar0x0BC1 || bleManager.foundChar0x0BC2,
+                            uuid = "00000BC1 / 00000BC2"
+                        )
+                        GattRow(
+                            label = "CCCD Notifications active",
                             found = bleManager.isNotificationEnabled,
-                            uuid = "Client Characteristic Config (0x2902)"
+                            uuid = "Subscribed across candidate notify/indicate chars"
                         )
                     }
                 }
@@ -363,7 +449,111 @@ fun AdminScreen(
                 }
             }
 
-            // 4. Quick Actions Card
+            // 4. Last 20 TX Hex Frames Card
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "4. Last 20 TX Frames",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = CyberCyan
+                            )
+                            Text(
+                                text = "${allTxRecords.size} Total TX",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        val recentTx = allTxRecords.takeLast(20).asReversed()
+                        if (recentTx.isEmpty()) {
+                            Text(
+                                text = "No transmissions logged in this session yet.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 280.dp)
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                recentTx.forEach { tx ->
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.background)
+                                            .padding(8.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = "${tx.formattedTime} [${tx.writeType}]",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = CyberCyan
+                                            )
+                                            Text(
+                                                text = tx.variantDescription,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "Target: ${tx.targetUuid.takeLast(8)}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = tx.hexString,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            OutlinedButton(
+                                onClick = {
+                                    val fullTxText = recentTx.joinToString("\n") { it.toLineString() }
+                                    copyToClipboard(context, "Last 20 TX Hex", fullTxText)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Copy Last 20 TX Hex", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5. Quick Actions Card
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),

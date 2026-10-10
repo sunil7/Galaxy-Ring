@@ -120,16 +120,16 @@ data class SleepAnalysis(
  * Combined telemetry snapshot from the Galaxy Ring.
  */
 data class RingHealthSnapshot(
-    val battery: RingBattery = RingBattery(level = 82, isCharging = false),
-    val latestHeartRate: HeartRateSample = HeartRateSample(bpm = 68),
+    val battery: RingBattery = RingBattery(level = 0, isCharging = false, timestamp = 0L),
+    val latestHeartRate: HeartRateSample = HeartRateSample(bpm = 0, confidence = 0, timestamp = 0L),
     val heartRateHistory: List<HeartRateSample> = emptyList(),
-    val latestOxygenSaturation: OxygenSaturationSample? = OxygenSaturationSample(percentage = 98.0f),
+    val latestOxygenSaturation: OxygenSaturationSample? = null,
     val oxygenSaturationHistory: List<OxygenSaturationSample> = emptyList(),
-    val steps: StepData = StepData(totalSteps = 6420),
-    val temperature: SkinTemperature = SkinTemperature(temperatureCelsius = 36.4f, baselineDelta = 0.1f),
+    val steps: StepData = StepData(totalSteps = 0L, caloriesKcal = 0, distanceMeters = 0.0, timestamp = 0L),
+    val temperature: SkinTemperature = SkinTemperature(temperatureCelsius = 0f, baselineDelta = 0.0f, timestamp = 0L),
     val latestSleep: SleepSession? = null,
     val latestSleepAnalysis: SleepAnalysis? = null,
-    val lastSyncTimestamp: Long = System.currentTimeMillis(),
+    val lastSyncTimestamp: Long = 0L,
     val isSimulatedTelemetry: Boolean = false
 )
 
@@ -143,7 +143,7 @@ sealed class ConnectionState {
     data class Connected(val device: RingDevice) : ConnectionState()
     data class Initializing(val currentStep: Int, val totalSteps: Int) : ConnectionState()
     data class Syncing(val message: String) : ConnectionState()
-    data class Ready(val device: RingDevice) : ConnectionState()
+    data class Ready(val device: RingDevice, val rxCountSinceConnect: Int = 0) : ConnectionState()
     data class Error(val message: String) : ConnectionState()
 }
 

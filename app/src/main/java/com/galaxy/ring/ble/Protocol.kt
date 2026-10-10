@@ -33,8 +33,27 @@ object Protocol {
     val SR16_WRITE_CHAR_UUID: UUID = UUID.fromString("0000B002-0000-1000-8000-00805F9B34FB")
     val SR16_NOTIFY_CHAR_UUID: UUID = UUID.fromString("0000B003-0000-1000-8000-00805F9B34FB")
 
+    // Additional hardware services found on real SR16 (0xFF00, 0x0BC0)
+    val SERVICE_FF00_UUID: UUID = UUID.fromString("0000FF00-0000-1000-8000-00805F9B34FB")
+    val CHAR_FF01_WRITE_UUID: UUID = UUID.fromString("0000FF01-0000-1000-8000-00805F9B34FB")
+    val CHAR_FF02_NOTIFY_UUID: UUID = UUID.fromString("0000FF02-0000-1000-8000-00805F9B34FB")
+    val CHAR_FF03_NOTIFY_UUID: UUID = UUID.fromString("0000FF03-0000-1000-8000-00805F9B34FB")
+
+    val SERVICE_0BC0_UUID: UUID = UUID.fromString("00000BC0-0000-1000-8000-00805F9B34FB")
+    val CHAR_0BC1_NOTIFY_UUID: UUID = UUID.fromString("00000BC1-0000-1000-8000-00805F9B34FB")
+    val CHAR_0BC2_NOTIFY_UUID: UUID = UUID.fromString("00000BC2-0000-1000-8000-00805F9B34FB")
+
     // Standard Client Characteristic Configuration Descriptor
     val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805F9B34FB")
+
+    /**
+     * Checks if a UUID matches a 16-bit short hexadecimal representation.
+     */
+    fun matchesShortUuid(uuid: UUID, shortHex: String): Boolean {
+        val s = uuid.toString().lowercase()
+        val target = shortHex.lowercase().padStart(4, '0')
+        return s.startsWith("0000$target") || s.contains(target)
+    }
 
     // Standard GATT Bluetooth SIG UUIDs (supported as fallbacks)
     val BATTERY_SERVICE_UUID: UUID = UUID.fromString("0000180F-0000-1000-8000-00805F9B34FB")
@@ -116,21 +135,16 @@ object Protocol {
     }
 
     /**
-     * Builds an SR16 protocol frame:
-     * [0] Header (0xAB)
-     * [1] Payload Length (N)
-     * [2..(2+N-1)] Payload bytes
-     * [2+N] CRC16-ARC Low Byte
-     * [2+N+1] CRC16-ARC High Byte
+     * Variant 1: Current standard SR16 frame
+     * [0xAB][len][payload][crcL][crcH]
      */
-    fun buildSr16Frame(payload: ByteArray): ByteArray {
+    fun buildVariant1(payload: ByteArray): ByteArray {
         val length = payload.size
         val packet = ByteArray(1 + 1 + length + 2)
         packet[0] = FRAME_HEADER_SR16
         packet[1] = length.toByte()
         System.arraycopy(payload, 0, packet, 2, length)
 
-        // CRC16-ARC computed over header + length + payload
         val crc = crc16Arc(packet, 0, 2 + length)
         packet[2 + length] = (crc and 0xFF).toByte()
         packet[2 + length + 1] = ((crc ushr 8) and 0xFF).toByte()
@@ -138,10 +152,16 @@ object Protocol {
     }
 
     /**
-     * Builds a raw framed command without extra length byte:
-     * [0] 0xAB, [1..N] payload, [N+1..N+2] CRC16-ARC
+     * Variant 2: Raw payload only (no AB framing, no CRC)
      */
-    fun buildSr16RawFrame(payload: ByteArray): ByteArray {
+    fun buildVariant2(payload: ByteArray): ByteArray {
+        return payload.copyOf()
+    }
+
+    /**
+     * Variant 3: [0xAB][payload][crcL][crcH] without length byte
+     */
+    fun buildVariant3(payload: ByteArray): ByteArray {
         val packet = ByteArray(1 + payload.size + 2)
         packet[0] = FRAME_HEADER_SR16
         System.arraycopy(payload, 0, packet, 1, payload.size)
@@ -150,6 +170,26 @@ object Protocol {
         packet[1 + payload.size + 1] = ((crc ushr 8) and 0xFF).toByte()
         return packet
     }
+
+    /**
+     * Variant 4: Same as Variant 1 with CRC bytes swapped (big-endian: [0xAB][len][payload][crcH][crcL])
+     */
+    fun buildVariant4(payload: ByteArray): ByteArray {
+        val length = payload.size
+        val packet = ByteArray(1 + 1 + length + 2)
+        packet[0] = FRAME_HEADER_SR16
+        packet[1] = length.toByte()
+        System.arraycopy(payload, 0, packet, 2, length)
+
+        val crc = crc16Arc(packet, 0, 2 + length)
+        packet[2 + length] = ((crc ushr 8) and 0xFF).toByte() // CRC High byte first
+        packet[2 + length + 1] = (crc and 0xFF).toByte()        // CRC Low byte second
+        return packet
+    }
+
+    fun buildSr16Frame(payload: ByteArray): ByteArray = buildVariant1(payload)
+
+    fun buildSr16RawFrame(payload: ByteArray): ByteArray = buildVariant3(payload)
 
     /**
      * Verifies whether an incoming packet has valid SR16 framing and CRC16-ARC.

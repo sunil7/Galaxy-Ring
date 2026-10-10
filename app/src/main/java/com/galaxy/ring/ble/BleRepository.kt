@@ -1,5 +1,6 @@
 package com.galaxy.ring.ble
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -14,8 +15,11 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import androidx.core.content.ContextCompat
 import com.galaxy.ring.data.ConnectionState
 import com.galaxy.ring.data.HeartRateSample
 import com.galaxy.ring.data.ManualMeasurementState
@@ -79,9 +83,29 @@ class BleRepository(
     private val _manualMeasurementState = MutableStateFlow<ManualMeasurementState>(ManualMeasurementState.Idle)
     val manualMeasurementState: StateFlow<ManualMeasurementState> = _manualMeasurementState.asStateFlow()
 
+    val rxCountSinceConnect: StateFlow<Int> = bleManager.rxCountFlow
+
     private var simulationJob: Job? = null
     private var reconnectJob: Job? = null
     private var isUserDisconnect = false
+
+    /**
+     * Checks if all required runtime Bluetooth permissions are granted.
+     * Logs permission states to [AppLog].
+     */
+    fun hasBlePermissions(): Boolean {
+        val scanOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        }
+        val connectOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+        } else true
+
+        AppLog.i(tagBle, "Permission status check: BLUETOOTH_SCAN=$scanOk, BLUETOOTH_CONNECT=$connectOk (Android API ${Build.VERSION.SDK_INT})")
+        return scanOk && connectOk
+    }
 
     init {
         // Observe decoded biometric data from GalaxyRingBLEManager
@@ -226,7 +250,16 @@ class BleRepository(
     }
 
     @SuppressLint("MissingPermission")
-    fun startScan() {
+    fun startScan(onRequestPermissionsNeeded: (() -> Unit)? = null) {
+        if (!hasBlePermissions()) {
+            val msg = "Missing Bluetooth permissions (BLUETOOTH_SCAN / CONNECT)"
+            AppLog.w(tagBle, "startScan ABORTED: $msg. Please grant permissions before scanning.")
+            _discoveredDevices.value = emptyList()
+            _connectionState.value = ConnectionState.Error("Bluetooth permission required")
+            onRequestPermissionsNeeded?.invoke()
+            return
+        }
+
         val adapter = bluetoothAdapter
         if (adapter == null || !adapter.isEnabled) {
             val msg = "Bluetooth is disabled or unavailable"
@@ -271,7 +304,15 @@ class BleRepository(
     }
 
     @SuppressLint("MissingPermission")
-    fun connect(address: String, deviceName: String = "Galaxy Ring") {
+    fun connect(address: String, deviceName: String = "Galaxy Ring", onRequestPermissionsNeeded: (() -> Unit)? = null) {
+        if (!hasBlePermissions()) {
+            val msg = "Missing Bluetooth permissions (BLUETOOTH_CONNECT)"
+            AppLog.w(tagBle, "connect ABORTED: $msg. Please grant permissions before connecting.")
+            _connectionState.value = ConnectionState.Error("Bluetooth permission required")
+            onRequestPermissionsNeeded?.invoke()
+            return
+        }
+
         isUserDisconnect = false
         reconnectJob?.cancel()
         stopScan()
@@ -326,35 +367,32 @@ class BleRepository(
      */
     private fun startPostConnectionFlow(gatt: BluetoothGatt, device: RingDevice) {
         scope.launch {
-            // 1. Run Initialization Sequence (0302 -> 0202 -> 0201 -> 0263) via GalaxyRingBLEManager
-            val initSuccess = bleManager.runInitializationSequence(gatt)
-            if (!initSuccess) {
-                AppLog.e(tagBle, "Post-connection initialization sequence aborted")
-                return@launch
-            }
+            // 1. Run Initialization Sequence via GalaxyRingBLEManager (tries frame variants & write types)
+            bleManager.runInitializationSequence(gatt)
 
             // 2. Sync Initial Vitals
             _connectionState.value = ConnectionState.Syncing("Syncing steps & latest vitals...")
             delay(200)
 
             // Request steps today (05 1A)
-            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_STEPS_TODAY, timeoutMs = 2000L)
-            delay(300)
+            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_STEPS_TODAY, timeoutMs = 1800L)
+            delay(250)
 
             // Request Heart Rate (02 24)
-            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_HEART_RATE, timeoutMs = 2000L)
-            delay(300)
+            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_HEART_RATE, timeoutMs = 1800L)
+            delay(250)
 
             // Request SpO2 (02 4E)
-            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_SPO2, timeoutMs = 2000L)
-            delay(300)
+            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_SPO2, timeoutMs = 1800L)
+            delay(250)
 
             // Request Sleep (05 1B)
-            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_PULL_SLEEP, timeoutMs = 2000L)
+            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_PULL_SLEEP, timeoutMs = 1800L)
             delay(200)
 
-            _connectionState.value = ConnectionState.Ready(device)
-            AppLog.i(tagBle, "SR16 Ring is successfully INITIALIZED and READY.")
+            val rxTotal = bleManager.rxCountSinceConnect
+            _connectionState.value = ConnectionState.Ready(device, rxTotal)
+            AppLog.i(tagBle, "SR16 Ring marked READY. Total RX frames since connect: $rxTotal")
         }
     }
 
@@ -376,14 +414,11 @@ class BleRepository(
             }
             return "Not READY (current: $stateLabel). Wait until Ready."
         }
-        if (bleManager.writeCharacteristic == null) {
-            return "0xB002 write characteristic missing."
-        }
-        if (bleManager.notifyCharacteristic == null) {
-            return "0xB003 notify characteristic missing."
+        if (bleManager.writeCharacteristic == null && bleManager.altWriteCharacteristic == null) {
+            return "Write characteristic (0xB002/0xFF01) missing."
         }
         if (!bleManager.isNotificationEnabled) {
-            return "0xB003 notifications not enabled. Enable CCCD."
+            return "Notifications not enabled on ring. Check Admin logs."
         }
         return null
     }
@@ -650,13 +685,35 @@ class BleRepository(
 
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 _connectionState.value = ConnectionState.Connecting(ringDevice.name)
-                AppLog.i(tagBle, "Connected to GATT server; discovering services...")
-                gatt.discoverServices()
+                AppLog.i(tagBle, "Connected to GATT server on ${device.address}. Resetting session and requesting MTU 247...")
+                bleManager.resetSession()
+
+                // Request MTU 247 as per Requirement B
+                val mtuInitiated = gatt.requestMtu(247)
+                AppLog.i(tagBle, "requestMtu(247) initiated: $mtuInitiated")
+
+                // Fallback timer: if onMtuChanged is delayed or skipped by device, discover services
+                mainHandler.removeCallbacksAndMessages("MTU_TIMEOUT")
+                mainHandler.postDelayed({
+                    AppLog.d(tagBle, "MTU fallback trigger: discovering services on ${device.address}...")
+                    gatt.discoverServices()
+                }, 1200)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                mainHandler.removeCallbacksAndMessages("MTU_TIMEOUT")
                 AppLog.w(tagBle, "Disconnected from GATT server")
                 _connectionState.value = ConnectionState.Disconnected
                 stopSimulation()
                 scheduleAutoReconnect()
+            }
+        }
+
+        @SuppressLint("MissingPermission")
+        override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+            mainHandler.removeCallbacksAndMessages("MTU_TIMEOUT")
+            AppLog.i(tagBle, "onMtuChanged: mtu=$mtu, status=$status")
+            AppLog.mtuNegotiated = mtu
+            mainHandler.post {
+                gatt.discoverServices()
             }
         }
 
@@ -676,46 +733,57 @@ class BleRepository(
             val batteryService = gatt.getService(Protocol.BATTERY_SERVICE_UUID)
             val batteryChar = batteryService?.getCharacteristic(Protocol.BATTERY_LEVEL_CHAR_UUID)
             if (batteryChar != null) {
-                AppLog.d(tagBle, "Discovered Battery characteristic 0x2A19, reading initial level...")
+                AppLog.d(tagBle, "Discovered standard Battery characteristic 0x2A19, reading level...")
                 @Suppress("DEPRECATION")
                 gatt.readCharacteristic(batteryChar)
             }
 
-            // Setup notification observer on characteristic 0xB003 via GalaxyRingBLEManager
-            val observerConfigured = bleManager.setupNotificationObserver(gatt)
-            if (!observerConfigured) {
-                AppLog.w(tagBle, "0xB003 notification observer configuration deferred; starting init flow")
+            // Setup notification and indication listeners across 0xB003, 0xFF02, 0xFF03, 0x0BC1, 0x0BC2
+            scope.launch {
+                val observerConfigured = bleManager.setupNotificationObserver(gatt)
+                AppLog.i(tagBle, "Broad notification observer configured: $observerConfigured")
                 startPostConnectionFlow(gatt, device)
             }
         }
 
         override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
-            AppLog.i(tagBle, "onDescriptorWrite: ${descriptor.uuid}, status=$status")
+            AppLog.i(tagBle, "onDescriptorWrite [${descriptor.characteristic.uuid} / ${descriptor.uuid}]: status=$status")
+            bleManager.onDescriptorWriteCompleted(descriptor, status)
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 bleManager.markNotificationEnabled(true)
-                val device = RingDevice(gatt.device.name ?: "Galaxy Ring", gatt.device.address, isConnected = true)
-                startPostConnectionFlow(gatt, device)
-            } else {
-                bleManager.markNotificationEnabled(false)
-                AppLog.e(tagBle, "CCCD descriptor write failed with status $status")
             }
+        }
+
+        override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            val statusStr = if (status == BluetoothGatt.GATT_SUCCESS) "SUCCESS" else "STATUS_$status"
+            AppLog.d(tagBle, "onCharacteristicWrite [${characteristic.uuid}]: $statusStr")
+            bleManager.onCharacteristicWriteCompleted(characteristic, status)
         }
 
         @Suppress("DEPRECATION")
         override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
             val data = characteristic.value ?: return
-            bleManager.onNotificationReceived(characteristic, data)
-            Protocol.parseBatteryLevel(data)?.let { battery ->
-                _snapshot.value = _snapshot.value.copy(battery = battery)
-            }
+            handleIncomingData(characteristic, data)
         }
 
+        // Newer Android 13+ (API 33+) callback
+        override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
+            handleIncomingData(characteristic, value)
+        }
+
+        // Legacy pre-Android 13 callback
         @Suppress("DEPRECATION")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             val data = characteristic.value ?: return
+            handleIncomingData(characteristic, data)
+        }
+
+        private fun handleIncomingData(characteristic: BluetoothGattCharacteristic, data: ByteArray) {
             bleManager.onNotificationReceived(characteristic, data)
             Protocol.parseBatteryLevel(data)?.let { battery ->
-                _snapshot.value = _snapshot.value.copy(battery = battery)
+                if (battery.level > 0) {
+                    _snapshot.value = _snapshot.value.copy(battery = battery)
+                }
             }
         }
     }

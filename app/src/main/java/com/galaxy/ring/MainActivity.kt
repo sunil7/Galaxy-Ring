@@ -40,10 +40,17 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val allGranted = permissions.values.all { it }
+        com.galaxy.ring.debug.AppLog.i("Permissions", "BLE permission request callback result: allGranted=$allGranted, grantedMap=$permissions")
         if (!allGranted) {
             Toast.makeText(
                 this,
                 "Bluetooth permission needed to scan and connect with Galaxy Ring",
+                Toast.LENGTH_SHORT
+            ).show()
+        } else {
+            Toast.makeText(
+                this,
+                "Bluetooth permissions granted",
                 Toast.LENGTH_SHORT
             ).show()
         }
@@ -54,6 +61,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         checkHealthPermissions()
+        GalaxyRingApp.instance.bleRepository.hasBlePermissions()
 
         setContent {
             GalaxyRingTheme {
@@ -72,6 +80,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         checkHealthPermissions()
+        GalaxyRingApp.instance.bleRepository.hasBlePermissions()
     }
 
     private fun checkHealthPermissions() {

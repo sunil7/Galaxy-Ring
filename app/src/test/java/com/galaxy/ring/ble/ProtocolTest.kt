@@ -119,4 +119,44 @@ class ProtocolTest {
         assertNotNull(steps)
         assertEquals(8200L, steps?.totalSteps)
     }
+
+    @Test
+    fun testFrameVariants() {
+        val payload = byteArrayOf(0x02, 0x24)
+
+        // Variant 1: [0xAB][len][payload][crcL][crcH]
+        val v1 = Protocol.buildVariant1(payload)
+        assertEquals(0xAB.toByte(), v1[0])
+        assertEquals(2.toByte(), v1[1])
+        assertEquals(0x02.toByte(), v1[2])
+        assertEquals(0x24.toByte(), v1[3])
+        assertEquals(6, v1.size)
+
+        // Variant 2: raw payload
+        val v2 = Protocol.buildVariant2(payload)
+        assertEquals(2, v2.size)
+        assertEquals(0x02.toByte(), v2[0])
+        assertEquals(0x24.toByte(), v2[1])
+
+        // Variant 3: [0xAB][payload][crcL][crcH]
+        val v3 = Protocol.buildVariant3(payload)
+        assertEquals(0xAB.toByte(), v3[0])
+        assertEquals(0x02.toByte(), v3[1])
+        assertEquals(0x24.toByte(), v3[2])
+        assertEquals(5, v3.size)
+
+        // Variant 4: [0xAB][len][payload][crcH][crcL] (swapped CRC)
+        val v4 = Protocol.buildVariant4(payload)
+        assertEquals(0xAB.toByte(), v4[0])
+        assertEquals(2.toByte(), v4[1])
+        assertEquals(v1[5], v4[4]) // CRC swapped
+        assertEquals(v1[4], v4[5])
+
+        // Short UUID matching
+        assertTrue(Protocol.matchesShortUuid(Protocol.SR16_SERVICE_UUID, "A00A"))
+        assertTrue(Protocol.matchesShortUuid(Protocol.SR16_WRITE_CHAR_UUID, "B002"))
+        assertTrue(Protocol.matchesShortUuid(Protocol.SR16_NOTIFY_CHAR_UUID, "B003"))
+        assertTrue(Protocol.matchesShortUuid(Protocol.SERVICE_FF00_UUID, "FF00"))
+        assertTrue(Protocol.matchesShortUuid(Protocol.SERVICE_0BC0_UUID, "0BC0"))
+    }
 }

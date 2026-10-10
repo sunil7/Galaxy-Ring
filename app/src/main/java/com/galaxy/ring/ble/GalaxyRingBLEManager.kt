@@ -4,7 +4,9 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
+import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
+import android.os.Build
 import com.galaxy.ring.data.HeartRateSample
 import com.galaxy.ring.data.OxygenSaturationSample
 import com.galaxy.ring.data.SleepSession
@@ -25,15 +27,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.UUID
 
 /**
  * Manages low-level Bluetooth LE communication with the Galaxy Ring / SR16 smart ring.
  *
- * Responsibilities:
- * 1. Handles command frame framing (0xAB header + length + payload + CRC16-ARC checksum).
- * 2. Implements the post-connect initialization sequence (0302 -> 0202 -> 0201 -> 0263, optional 0304).
- * 3. Observes and decodes incoming notifications from characteristic 0xB003 via CCCD.
- * 4. Logs all frames (TX/RX), discovery summaries, and parse outcomes to [AppLog].
+ * Implements:
+ * 1. Diagnostic GATT inspection for 0xA00A, 0xFF00 (0xFF01..0xFF03), 0x0BC0 (0x0BC1..0x0BC2).
+ * 2. Simultaneous notification and indication listening across ALL candidate characteristics.
+ * 3. Write type evaluation (WRITE_TYPE_DEFAULT vs WRITE_TYPE_NO_RESPONSE) on newer APIs.
+ * 4. Systematic frame variant experimentation (Variants 1 to 5) until first RX is confirmed.
+ * 5. Honest session RX telemetry tracking ([rxCountSinceConnect]).
  */
 class GalaxyRingBLEManager(
     private val context: Context,
@@ -42,41 +46,78 @@ class GalaxyRingBLEManager(
 
     private val tag = "GalaxyRingBLE"
 
-    // Discovered Characteristics for SR16 Ring
+    // Primary & Alternate Write Characteristics
     var writeCharacteristic: BluetoothGattCharacteristic? = null
         private set
 
+    var altWriteCharacteristic: BluetoothGattCharacteristic? = null
+        private set
+
+    // Primary Notify Characteristic (0xB003)
     var notifyCharacteristic: BluetoothGattCharacteristic? = null
         private set
+
+    // All active listening characteristics subscribed via CCCD
+    private val subscribedNotifyChars = mutableListOf<BluetoothGattCharacteristic>()
 
     // Diagnostic & GATT Discovery State
     var foundService0xA00A: Boolean = false
         private set
-
     var foundWrite0xB002: Boolean = false
         private set
-
     var foundNotify0xB003: Boolean = false
+        private set
+
+    var foundService0xFF00: Boolean = false
+        private set
+    var foundChar0xFF01: Boolean = false
+        private set
+    var foundChar0xFF02: Boolean = false
+        private set
+    var foundChar0xFF03: Boolean = false
+        private set
+
+    var foundService0x0BC0: Boolean = false
+        private set
+    var foundChar0x0BC1: Boolean = false
+        private set
+    var foundChar0x0BC2: Boolean = false
         private set
 
     var isNotificationEnabled: Boolean = false
         private set
 
+    // Live RX / TX Telemetry
+    var rxCountSinceConnect: Int = 0
+        private set
+
+    private val _rxCountFlow = MutableStateFlow(0)
+    val rxCountFlow: StateFlow<Int> = _rxCountFlow.asStateFlow()
+
     var lastTxHex: String? = null
         private set
-
     var lastRxHex: String? = null
         private set
-
     var lastRxTimestamp: Long = 0L
         private set
-
     var lastRxBytesCount: Int = 0
         private set
 
-    // Concurrency control for write commands
+    // Working variant locked in after first RX received
+    var workingVariantName: String? = null
+        private set
+    var workingVariantIndex: Int? = null
+        private set
+    var workingTargetChar: BluetoothGattCharacteristic? = null
+        private set
+    var workingWriteType: Int? = null
+        private set
+
+    // Concurrency control
     private val writeMutex = Mutex()
     private var pendingResponse: CompletableDeferred<ByteArray>? = null
+    private var pendingDescriptorDeferred: CompletableDeferred<Int>? = null
+    private var pendingWriteCharDeferred: CompletableDeferred<Int>? = null
 
     // Initialization Sequence State
     sealed class InitState {
@@ -89,7 +130,7 @@ class GalaxyRingBLEManager(
     private val _initState = MutableStateFlow<InitState>(InitState.Idle)
     val initState: StateFlow<InitState> = _initState.asStateFlow()
 
-    // Observable flows for incoming data on characteristic 0xB003
+    // Observable flows for incoming data
     private val _rawNotifications = MutableSharedFlow<ByteArray>(extraBufferCapacity = 64)
     val rawNotifications: SharedFlow<ByteArray> = _rawNotifications.asSharedFlow()
 
@@ -105,6 +146,27 @@ class GalaxyRingBLEManager(
     private val _sleepFlow = MutableSharedFlow<SleepSession>(extraBufferCapacity = 16)
     val sleepFlow: SharedFlow<SleepSession> = _sleepFlow.asSharedFlow()
 
+    /**
+     * Resets session telemetry counters when a new device connection is established.
+     */
+    fun resetSession() {
+        rxCountSinceConnect = 0
+        _rxCountFlow.value = 0
+        AppLog.rxCountSinceConnect = 0
+        workingVariantName = null
+        workingVariantIndex = null
+        workingTargetChar = null
+        workingWriteType = null
+        AppLog.workingVariant = null
+        lastTxHex = null
+        lastRxHex = null
+        lastRxTimestamp = 0L
+        lastRxBytesCount = 0
+        _initState.value = InitState.Idle
+        subscribedNotifyChars.clear()
+        AppLog.i(tag, "Session telemetry reset (rxCount=0, variants reset)")
+    }
+
     fun markNotificationEnabled(enabled: Boolean) {
         isNotificationEnabled = enabled
     }
@@ -115,167 +177,222 @@ class GalaxyRingBLEManager(
         } else null
     }
 
-    // =========================================================================
-    // 1. Command Frame Encoding & Verification (0xAB + CRC16-ARC)
-    // =========================================================================
-
-    /**
-     * Builds an outgoing command frame for the SR16 ring:
-     * - Byte 0: 0xAB (Start of frame)
-     * - Byte 1: Payload length (N)
-     * - Bytes 2..(2+N-1): Payload
-     * - Bytes (2+N)..(2+N+1): CRC16-ARC (little-endian: low byte, high byte)
-     */
-    fun buildCommandFrame(payload: ByteArray): ByteArray {
-        val length = payload.size
-        val packet = ByteArray(1 + 1 + length + 2)
-        packet[0] = Protocol.FRAME_HEADER_SR16
-        packet[1] = length.toByte()
-        System.arraycopy(payload, 0, packet, 2, length)
-
-        val crc = Protocol.crc16Arc(packet, 0, 2 + length)
-        packet[2 + length] = (crc and 0xFF).toByte()
-        packet[2 + length + 1] = ((crc ushr 8) and 0xFF).toByte()
-        return packet
+    fun onDescriptorWriteCompleted(descriptor: BluetoothGattDescriptor, status: Int) {
+        AppLog.d(tag, "onDescriptorWriteCompleted: ${descriptor.uuid}, status=$status")
+        pendingDescriptorDeferred?.complete(status)
     }
 
-    /**
-     * Verifies that the frame begins with 0xAB / 0xBA and passes CRC16-ARC validation.
-     */
-    fun verifyFrame(data: ByteArray): Boolean {
-        return Protocol.isValidSr16Frame(data)
-    }
-
-    /**
-     * Extracts payload bytes by stripping the 0xAB header, length, and CRC16-ARC footer.
-     */
-    fun extractPayload(data: ByteArray): ByteArray {
-        return Protocol.extractSr16Payload(data)
+    fun onCharacteristicWriteCompleted(characteristic: BluetoothGattCharacteristic, status: Int) {
+        AppLog.d(tag, "onCharacteristicWriteCompleted: ${characteristic.uuid}, status=$status")
+        pendingWriteCharDeferred?.complete(status)
     }
 
     // =========================================================================
-    // 2. Notification Observer Setup for Characteristic 0xB003
+    // 1. Service Discovery & Broad Notification Setup
     // =========================================================================
 
     /**
-     * Configures notifications for characteristic 0xB003.
-     * Logs every GATT service and characteristic UUID discovered,
-     * locates service 0xA00A, characteristic 0xB002 (write), 0xB003 (notify),
-     * enables notifications on the local GATT client, and writes CCCD.
+     * Discovers all services, checks 0xA00A, 0xFF00, 0x0BC0, logs characteristic properties,
+     * and sequentially subscribes to 0xB003, 0xFF02, 0xFF03, 0x0BC1, 0x0BC2 and any notify/indicate chars.
      */
     @SuppressLint("MissingPermission")
-    fun setupNotificationObserver(gatt: BluetoothGatt): Boolean {
+    suspend fun setupNotificationObserver(gatt: BluetoothGatt): Boolean {
         AppLog.i(tag, "GATT services discovered (${gatt.services.size} total) on device ${gatt.device.address}")
 
-        // Log every GATT service + characteristic UUID after discovery
-        for (service in gatt.services) {
-            val charSummary = service.characteristics.joinToString { it.uuid.toString() }
-            AppLog.d(tag, "Discovered GATT Service: ${service.uuid} -> [${charSummary.ifEmpty { "no chars" }}]")
-        }
-
-        // Reset discovery status flags
         foundService0xA00A = false
         foundWrite0xB002 = false
         foundNotify0xB003 = false
+        foundService0xFF00 = false
+        foundChar0xFF01 = false
+        foundChar0xFF02 = false
+        foundChar0xFF03 = false
+        foundService0x0BC0 = false
+        foundChar0x0BC1 = false
+        foundChar0x0BC2 = false
         isNotificationEnabled = false
         writeCharacteristic = null
+        altWriteCharacteristic = null
         notifyCharacteristic = null
+        subscribedNotifyChars.clear()
 
-        // Locate primary service 0xA00A and characteristics 0xB002 / 0xB003
+        val candidateNotifyChars = mutableListOf<BluetoothGattCharacteristic>()
+
         for (service in gatt.services) {
-            val sUuid = service.uuid.toString()
-            if (sUuid.contains("A00A", ignoreCase = true) || service.uuid == Protocol.SR16_SERVICE_UUID) {
-                foundService0xA00A = true
-                AppLog.i(tag, "Identified SR16 primary service 0xA00A: ${service.uuid}")
-                for (ch in service.characteristics) {
-                    val cUuid = ch.uuid.toString()
-                    if (cUuid.contains("B002", ignoreCase = true) || ch.uuid == Protocol.SR16_WRITE_CHAR_UUID) {
-                        writeCharacteristic = ch
-                        foundWrite0xB002 = true
-                        AppLog.i(tag, "Identified SR16 Write characteristic 0xB002: ${ch.uuid}")
-                    }
-                    if (cUuid.contains("B003", ignoreCase = true) || ch.uuid == Protocol.SR16_NOTIFY_CHAR_UUID) {
-                        notifyCharacteristic = ch
-                        foundNotify0xB003 = true
-                        AppLog.i(tag, "Identified SR16 Notify characteristic 0xB003: ${ch.uuid}")
-                    }
+            val sUuidStr = service.uuid.toString().uppercase()
+            val charSummary = service.characteristics.joinToString { ch ->
+                val pStr = buildString {
+                    if ((ch.properties and BluetoothGattCharacteristic.PROPERTY_READ) != 0) append("R ")
+                    if ((ch.properties and BluetoothGattCharacteristic.PROPERTY_WRITE) != 0) append("W ")
+                    if ((ch.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) append("WNR ")
+                    if ((ch.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0) append("N ")
+                    if ((ch.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0) append("I ")
+                }.trim()
+                "${ch.uuid}[$pStr]"
+            }
+            AppLog.d(tag, "GATT Service: ${service.uuid} -> [${charSummary.ifEmpty { "no chars" }}]")
+
+            if (Protocol.matchesShortUuid(service.uuid, "A00A")) foundService0xA00A = true
+            if (Protocol.matchesShortUuid(service.uuid, "FF00")) foundService0xFF00 = true
+            if (Protocol.matchesShortUuid(service.uuid, "0BC0")) foundService0x0BC0 = true
+
+            for (ch in service.characteristics) {
+                if (Protocol.matchesShortUuid(ch.uuid, "B002")) {
+                    writeCharacteristic = ch
+                    foundWrite0xB002 = true
+                    logCharProperties("0xB002", ch)
+                }
+                if (Protocol.matchesShortUuid(ch.uuid, "B003")) {
+                    notifyCharacteristic = ch
+                    foundNotify0xB003 = true
+                    if (!candidateNotifyChars.contains(ch)) candidateNotifyChars.add(0, ch)
+                }
+                if (Protocol.matchesShortUuid(ch.uuid, "FF01")) {
+                    altWriteCharacteristic = ch
+                    foundChar0xFF01 = true
+                    logCharProperties("0xFF01", ch)
+                }
+                if (Protocol.matchesShortUuid(ch.uuid, "FF02")) {
+                    foundChar0xFF02 = true
+                    if (!candidateNotifyChars.contains(ch)) candidateNotifyChars.add(ch)
+                }
+                if (Protocol.matchesShortUuid(ch.uuid, "FF03")) {
+                    foundChar0xFF03 = true
+                    if (!candidateNotifyChars.contains(ch)) candidateNotifyChars.add(ch)
+                }
+                if (Protocol.matchesShortUuid(ch.uuid, "0BC1")) {
+                    foundChar0x0BC1 = true
+                    if (!candidateNotifyChars.contains(ch)) candidateNotifyChars.add(ch)
+                }
+                if (Protocol.matchesShortUuid(ch.uuid, "0BC2")) {
+                    foundChar0x0BC2 = true
+                    if (!candidateNotifyChars.contains(ch)) candidateNotifyChars.add(ch)
+                }
+
+                // If characteristic supports NOTIFY or INDICATE, add to candidate list for debug listening
+                val hasNotify = (ch.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0
+                val hasIndicate = (ch.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0
+                if ((hasNotify || hasIndicate) && !candidateNotifyChars.contains(ch)) {
+                    candidateNotifyChars.add(ch)
                 }
             }
         }
 
-        // Broad fallback scan across all services if not found
-        if (writeCharacteristic == null || notifyCharacteristic == null) {
-            AppLog.w(tag, "0xB002 or 0xB003 not in 0xA00A; scanning all services as fallback...")
-            for (service in gatt.services) {
-                for (ch in service.characteristics) {
-                    val cUuid = ch.uuid.toString()
-                    if (writeCharacteristic == null && (cUuid.contains("B002", ignoreCase = true) || ch.uuid == Protocol.SR16_WRITE_CHAR_UUID)) {
-                        writeCharacteristic = ch
-                        foundWrite0xB002 = true
-                        AppLog.i(tag, "Found Write characteristic 0xB002 via fallback: ${ch.uuid}")
-                    }
-                    if (notifyCharacteristic == null && (cUuid.contains("B003", ignoreCase = true) || ch.uuid == Protocol.SR16_NOTIFY_CHAR_UUID)) {
-                        notifyCharacteristic = ch
-                        foundNotify0xB003 = true
-                        AppLog.i(tag, "Found Notify characteristic 0xB003 via fallback: ${ch.uuid}")
-                    }
-                }
-            }
-        }
-
-        // Log whether 0xB002 / 0xB003 were found
         AppLog.i(
             tag,
-            "GATT Summary -> Service 0xA00A: $foundService0xA00A, Write 0xB002: $foundWrite0xB002, Notify 0xB003: $foundNotify0xB003"
+            "GATT Inventory -> 0xA00A=$foundService0xA00A (0xB002=$foundWrite0xB002, 0xB003=$foundNotify0xB003); " +
+                    "0xFF00=$foundService0xFF00 (0xFF01=$foundChar0xFF01, 0xFF02=$foundChar0xFF02, 0xFF03=$foundChar0xFF03); " +
+                    "0x0BC0=$foundService0x0BC0 (0x0BC1=$foundChar0x0BC1, 0x0BC2=$foundChar0x0BC2)"
         )
 
-        val nChar = notifyCharacteristic
-        if (nChar == null) {
-            val err = "Failed to locate notify characteristic 0xB003 on ${gatt.device.address}"
-            AppLog.e(tag, err)
-            return false
+        if (writeCharacteristic == null) {
+            AppLog.w(tag, "Primary write 0xB002 not found; checking 0xFF01 as fallback write...")
+            writeCharacteristic = altWriteCharacteristic
         }
 
-        // 1. Enable local notification subscription in Android Bluetooth Stack
-        val successLocal = gatt.setCharacteristicNotification(nChar, true)
-        if (!successLocal) {
-            val err = "Failed to enable local characteristic notification on ${nChar.uuid}"
-            AppLog.e(tag, err)
-            return false
-        }
-
-        // 2. Enable remote notification via CCCD (Client Characteristic Configuration Descriptor 0x2902)
-        val descriptor = nChar.getDescriptor(Protocol.CCCD_UUID)
-        if (descriptor != null) {
-            AppLog.d(tag, "Writing ENABLE_NOTIFICATION_VALUE to CCCD ${descriptor.uuid}...")
-            @Suppress("DEPRECATION")
-            descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-            @Suppress("DEPRECATION")
-            val initiated = gatt.writeDescriptor(descriptor)
-            if (!initiated) {
-                val err = "Failed to initiate writeDescriptor for CCCD on 0xB003"
-                AppLog.e(tag, err)
-                return false
+        // Sequentially enable notifications/indications on all candidate characteristics
+        var successfullySubscribedCount = 0
+        for (char in candidateNotifyChars) {
+            val ok = enableNotificationOrIndication(gatt, char)
+            if (ok) {
+                successfullySubscribedCount++
+                subscribedNotifyChars.add(char)
             }
-            isNotificationEnabled = true
-        } else {
-            AppLog.w(tag, "CCCD descriptor (0x2902) not found on characteristic ${nChar.uuid}")
-            isNotificationEnabled = true // Local set, descriptor might be auto-subscribed or not exposed
+            delay(120) // Give BLE controller spacing between CCCD operations
         }
 
-        AppLog.i(tag, "Notification observer successfully configured on 0xB003")
-        return true
+        isNotificationEnabled = successfullySubscribedCount > 0
+        AppLog.i(
+            tag,
+            "Notification setup complete: $successfullySubscribedCount / ${candidateNotifyChars.size} characteristics listening"
+        )
+        return isNotificationEnabled
     }
 
+    private fun logCharProperties(label: String, ch: BluetoothGattCharacteristic) {
+        val p = ch.properties
+        val w = (p and BluetoothGattCharacteristic.PROPERTY_WRITE) != 0
+        val wnr = (p and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0
+        val n = (p and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0
+        val i = (p and BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0
+        AppLog.i(
+            tag,
+            "Characteristic $label [${ch.uuid}] properties=0x${Integer.toHexString(p)} (WRITE=$w, WRITE_NO_RESPONSE=$wnr, NOTIFY=$n, INDICATE=$i)"
+        )
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun enableNotificationOrIndication(
+        gatt: BluetoothGatt,
+        char: BluetoothGattCharacteristic
+    ): Boolean {
+        val hasNotify = (char.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0
+        val hasIndicate = (char.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0
+
+        val localOk = gatt.setCharacteristicNotification(char, true)
+        if (!localOk) {
+            AppLog.w(tag, "Failed to enable local notification on ${char.uuid}")
+            return false
+        }
+
+        val cccd = char.getDescriptor(Protocol.CCCD_UUID)
+        if (cccd == null) {
+            AppLog.d(tag, "CCCD (0x2902) not found on ${char.uuid}; local notification registered")
+            return true
+        }
+
+        val descriptorValue = if (hasNotify) {
+            BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        } else if (hasIndicate) {
+            BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+        } else {
+            BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        }
+
+        val def = CompletableDeferred<Int>()
+        pendingDescriptorDeferred = def
+
+        val initiated = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val res = gatt.writeDescriptor(cccd, descriptorValue)
+            res == BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            cccd.value = descriptorValue
+            @Suppress("DEPRECATION")
+            gatt.writeDescriptor(cccd)
+        }
+
+        if (!initiated) {
+            AppLog.w(tag, "writeDescriptor rejected by Bluetooth stack for ${char.uuid}")
+            pendingDescriptorDeferred = null
+            return false
+        }
+
+        val status = withTimeoutOrNull(1800L) { def.await() } ?: -1
+        pendingDescriptorDeferred = null
+        val ok = status == BluetoothGatt.GATT_SUCCESS
+        AppLog.i(
+            tag,
+            "CCCD write for [${char.uuid}] -> status=$status (${if (ok) "SUCCESS" else "FAILED"}), type=${if (hasNotify) "NOTIFY" else "INDICATE"}"
+        )
+        return ok
+    }
+
+    // =========================================================================
+    // 2. Incoming Notification / Indication Reception
+    // =========================================================================
+
     /**
-     * Dispatches raw characteristic changes received on characteristic 0xB003.
-     * Decodes the SR16 framing and emits parsed models into corresponding SharedFlows.
+     * Dispatches any raw characteristic change received on ANY characteristic.
      */
     fun onNotificationReceived(characteristic: BluetoothGattCharacteristic, data: ByteArray) {
         if (data.isEmpty()) {
-            AppLog.w(tag, "0xB003 Notification received with empty byte array")
+            AppLog.w(tag, "RX notification [${characteristic.uuid}] received with empty byte array")
             return
         }
+
+        rxCountSinceConnect++
+        _rxCountFlow.value = rxCountSinceConnect
+        AppLog.rxCountSinceConnect = rxCountSinceConnect
 
         val hexString = data.joinToString(" ") { "%02X".format(it) }
         lastRxHex = hexString
@@ -283,10 +400,11 @@ class GalaxyRingBLEManager(
         lastRxBytesCount = data.size
         AppLog.lastRxHex = hexString
 
-        // Always log every RX / notification as hex (even if parse fails)
-        AppLog.d(tag, "0xB003 RX Notification (${data.size} bytes): $hexString")
+        // Log EVERY onCharacteristicChanged with full UUID + hex, any service
+        AppLog.i(tag, "RX onCharacteristicChanged [${characteristic.uuid}] (${data.size} bytes): $hexString")
+        AppLog.recordRx(characteristic.uuid.toString(), hexString)
 
-        // Complete any pending command response awaiter and log RX
+        // Complete any pending command response
         val pending = pendingResponse
         if (pending != null && pending.isActive) {
             AppLog.i(tag, "RX completed pending response (${data.size} bytes): $hexString")
@@ -296,59 +414,250 @@ class GalaxyRingBLEManager(
         scope.launch {
             _rawNotifications.emit(data)
 
-            // Extract payload from 0xAB frame
-            val payload = extractPayload(data)
+            // Extract payload (handles both 0xAB framed and raw)
+            val payload = Protocol.extractSr16Payload(data)
             val payloadHex = payload.joinToString(" ") { "%02X".format(it) }
 
-            // 1. Parse Heart Rate (CMD 02 24)
-            val hr = Protocol.parseSr16HeartRate(payload)
+            // 1. Heart Rate
+            val hr = Protocol.parseSr16HeartRate(payload) ?: Protocol.parseHeartRate(data)
             if (hr != null) {
                 AppLog.i(tag, "HR parse SUCCESS: ${hr.bpm} BPM (payload: $payloadHex)")
                 _heartRateFlow.emit(hr)
-            } else {
-                AppLog.d(tag, "HR parse: no matching HR record in payload")
             }
 
-            // 2. Parse SpO₂ (CMD 02 4E)
+            // 2. SpO₂
             val spo2 = Protocol.parseSr16SpO2(payload)
             if (spo2 != null) {
                 AppLog.i(tag, "SpO₂ parse SUCCESS: ${spo2.percentage}% (payload: $payloadHex)")
                 _spo2Flow.emit(spo2)
-            } else {
-                AppLog.d(tag, "SpO₂ parse: no matching SpO₂ record in payload")
             }
 
-            // 3. Parse Steps (CMD 05 1A)
+            // 3. Steps
             val steps = Protocol.parseSr16Steps(payload)
             if (steps != null) {
                 AppLog.i(tag, "Steps parse SUCCESS: ${steps.totalSteps} steps (payload: $payloadHex)")
                 _stepsFlow.emit(steps)
-            } else {
-                AppLog.d(tag, "Steps parse: no matching Steps record in payload")
             }
 
-            // 4. Parse Sleep (CMD 05 1B)
+            // 4. Sleep
             val sleep = Protocol.parseSr16SleepSession(payload)
             if (sleep != null) {
                 AppLog.i(tag, "Sleep parse SUCCESS: ${sleep.durationMinutes} min (payload: $payloadHex)")
                 _sleepFlow.emit(sleep)
-            } else {
-                AppLog.d(tag, "Sleep parse: no matching Sleep record in payload")
             }
         }
     }
 
     // =========================================================================
-    // 3. Initialization Sequence Execution (0302 -> 0202 -> 0201 -> 0263)
+    // 3. Command Frame Format Experiments & Transmission
     // =========================================================================
 
     /**
-     * Executes the mandatory four-step SR16 initialization sequence:
-     * Step 1: 0302 (System Handshake)
-     * Step 2: 0202 (Health Configuration)
-     * Step 3: 0201 (Sensor Calibration)
-     * Step 4: 0263 (Ring Feature Handshake)
-     * Followed by optional Step 5: 0304 (Time sync/handshake)
+     * Transmits a command payload.
+     * If a working variant was already found for this session, sends directly using it.
+     * If 0 RX has arrived so far, tests variants 1 through 5 in order until first RX:
+     *   1) Current: [0xAB][len][payload][crcL][crcH] on 0xB002
+     *   2) Raw payload only to 0xB002
+     *   3) [0xAB][payload][crcL][crcH] without length byte on 0xB002
+     *   4) Big-endian CRC [0xAB][len][payload][crcH][crcL] on 0xB002
+     *   5) Same variants written to 0xFF01 if present
+     * Retries WRITE_TYPE_DEFAULT first, then WRITE_TYPE_NO_RESPONSE.
+     */
+    suspend fun sendCommandFrameWithRetry(
+        gatt: BluetoothGatt,
+        payload: ByteArray,
+        maxRetries: Int = 1,
+        timeoutMs: Long = 1800L
+    ): Boolean = writeMutex.withLock {
+        // If a working variant is locked in for this session, use it
+        val cachedChar = workingTargetChar ?: writeCharacteristic
+        val cachedWriteType = workingWriteType ?: BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        val cachedVariant = workingVariantIndex
+
+        if (cachedChar != null && cachedVariant != null) {
+            val frame = buildVariantFrame(cachedVariant, payload)
+            val desc = workingVariantName ?: "Variant $cachedVariant"
+            return sendRawFrameSingle(gatt, cachedChar, frame, cachedWriteType, desc, timeoutMs)
+        }
+
+        // Otherwise, run frame format experiments (1 -> 2 -> 3 -> 4 -> 5)
+        AppLog.i(tag, "No working variant confirmed yet; starting frame format experiment loop...")
+        val targetChar0xB002 = writeCharacteristic
+        val targetChar0xFF01 = altWriteCharacteristic
+
+        val candidates = mutableListOf<ExperimentCandidate>()
+
+        if (targetChar0xB002 != null) {
+            // Variant 1: [0xAB][len][payload][crcL][crcH]
+            candidates.add(
+                ExperimentCandidate(1, targetChar0xB002, "Variant 1 [0xAB+len+crcLE]", Protocol.buildVariant1(payload))
+            )
+            // Variant 2: Raw payload
+            candidates.add(
+                ExperimentCandidate(2, targetChar0xB002, "Variant 2 [Raw payload]", Protocol.buildVariant2(payload))
+            )
+            // Variant 3: [0xAB][payload][crcL][crcH]
+            candidates.add(
+                ExperimentCandidate(3, targetChar0xB002, "Variant 3 [0xAB+no-len+crcLE]", Protocol.buildVariant3(payload))
+            )
+            // Variant 4: Big-endian CRC
+            candidates.add(
+                ExperimentCandidate(4, targetChar0xB002, "Variant 4 [0xAB+len+crcBE]", Protocol.buildVariant4(payload))
+            )
+        }
+
+        if (targetChar0xFF01 != null) {
+            // Variant 5: Write to 0xFF01
+            candidates.add(
+                ExperimentCandidate(5, targetChar0xFF01, "Variant 5 [0xFF01: 0xAB+len+crcLE]", Protocol.buildVariant1(payload))
+            )
+            candidates.add(
+                ExperimentCandidate(5, targetChar0xFF01, "Variant 5 [0xFF01: Raw payload]", Protocol.buildVariant2(payload))
+            )
+        }
+
+        for (cand in candidates) {
+            AppLog.w(tag, "Trying frame variant ${cand.variantIndex}: ${cand.description} on ${cand.targetChar.uuid}")
+
+            // 1. Try WRITE_TYPE_DEFAULT
+            val rxBefore1 = rxCountSinceConnect
+            sendRawFrameSingle(
+                gatt,
+                cand.targetChar,
+                cand.frame,
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+                "${cand.description} (DEFAULT)",
+                timeoutMs
+            )
+
+            if (rxCountSinceConnect > rxBefore1) {
+                lockInWorkingVariant(cand.variantIndex, cand.description, cand.targetChar, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+                return true
+            }
+
+            // 2. If 0 RX, retry same payload with WRITE_TYPE_NO_RESPONSE
+            delay(150)
+            val rxBefore2 = rxCountSinceConnect
+            sendRawFrameSingle(
+                gatt,
+                cand.targetChar,
+                cand.frame,
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE,
+                "${cand.description} (NO_RESPONSE)",
+                timeoutMs
+            )
+
+            if (rxCountSinceConnect > rxBefore2) {
+                lockInWorkingVariant(cand.variantIndex, cand.description, cand.targetChar, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
+                return true
+            }
+
+            delay(200)
+        }
+
+        AppLog.w(tag, "Experiment loop completed: 0 RX received across all variants. Ring accepted writes.")
+        return true
+    }
+
+    private fun buildVariantFrame(variantIndex: Int, payload: ByteArray): ByteArray {
+        return when (variantIndex) {
+            1 -> Protocol.buildVariant1(payload)
+            2 -> Protocol.buildVariant2(payload)
+            3 -> Protocol.buildVariant3(payload)
+            4 -> Protocol.buildVariant4(payload)
+            5 -> Protocol.buildVariant1(payload)
+            else -> Protocol.buildVariant1(payload)
+        }
+    }
+
+    private fun lockInWorkingVariant(
+        variantIndex: Int,
+        description: String,
+        targetChar: BluetoothGattCharacteristic,
+        writeType: Int
+    ) {
+        workingVariantIndex = variantIndex
+        workingVariantName = description
+        workingTargetChar = targetChar
+        workingWriteType = writeType
+        AppLog.workingVariant = description
+        AppLog.i(
+            tag,
+            "★ FIRST RX CONFIRMED! Locked in session working variant: $description on ${targetChar.uuid} (writeType=$writeType)"
+        )
+    }
+
+    private data class ExperimentCandidate(
+        val variantIndex: Int,
+        val targetChar: BluetoothGattCharacteristic,
+        val description: String,
+        val frame: ByteArray
+    )
+
+    @SuppressLint("MissingPermission")
+    private suspend fun sendRawFrameSingle(
+        gatt: BluetoothGatt,
+        char: BluetoothGattCharacteristic,
+        frame: ByteArray,
+        writeType: Int,
+        variantDesc: String,
+        timeoutMs: Long
+    ): Boolean {
+        val targetUuid = char.uuid.toString()
+        val writeTypeStr = if (writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) "NO_RESP" else "DEFAULT"
+        val txHex = frame.joinToString(" ") { "%02X".format(it) }
+
+        lastTxHex = txHex
+        AppLog.lastTxHex = txHex
+        AppLog.i(tag, "TX ($writeTypeStr, $variantDesc, ${frame.size}B) -> [$targetUuid]: $txHex")
+        AppLog.recordTx(targetUuid, writeTypeStr, variantDesc, txHex)
+
+        val deferred = CompletableDeferred<ByteArray>()
+        pendingResponse = deferred
+        val writeCompleteDeferred = CompletableDeferred<Int>()
+        pendingWriteCharDeferred = writeCompleteDeferred
+
+        val initiated = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val res = gatt.writeCharacteristic(char, frame, writeType)
+            res == BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            char.value = frame
+            char.writeType = writeType
+            @Suppress("DEPRECATION")
+            gatt.writeCharacteristic(char)
+        }
+
+        if (!initiated) {
+            AppLog.e(tag, "Write rejected by Bluetooth stack for $targetUuid ($writeTypeStr)")
+            pendingResponse = null
+            pendingWriteCharDeferred = null
+            return false
+        }
+
+        // Wait for onCharacteristicWrite callback if DEFAULT write
+        if (writeType == BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) {
+            withTimeoutOrNull(1500L) {
+                writeCompleteDeferred.await()
+            }
+        }
+        pendingWriteCharDeferred = null
+
+        // Await notification/indication response with timeout
+        withTimeoutOrNull(timeoutMs) {
+            deferred.await()
+        }
+        pendingResponse = null
+        return true
+    }
+
+    // =========================================================================
+    // 4. Initialization Sequence
+    // =========================================================================
+
+    /**
+     * Executes the initialization sequence: 0302 -> 0202 -> 0201 -> 0263 (and optional 0304).
+     * Even if 0 RX arrives, completes gracefully so user can test and review Admin logs.
      */
     suspend fun runInitializationSequence(gatt: BluetoothGatt): Boolean {
         AppLog.i(tag, "Init sequence START: (0302 -> 0202 -> 0201 -> 0263)...")
@@ -364,100 +673,29 @@ class GalaxyRingBLEManager(
             _initState.value = InitState.InProgress(stepNum, steps.size, description)
             AppLog.d(tag, "Init Step $stepNum/${steps.size} START: $description")
 
-            val ok = sendCommandFrameWithRetry(gatt, cmd, maxRetries = 1, timeoutMs = 2500L)
-            if (!ok) {
-                val err = "Init Step $stepNum FAILED ($description): Timeout or write rejected"
-                AppLog.e(tag, err)
-                _initState.value = InitState.Failed(err)
-                return false
-            }
-            AppLog.d(tag, "Init Step $stepNum SUCCESS: $description")
-            delay(350)
+            sendCommandFrameWithRetry(gatt, cmd, maxRetries = 1, timeoutMs = 1500L)
+            AppLog.d(tag, "Init Step $stepNum DONE: $description (rxCount=$rxCountSinceConnect)")
+            delay(250)
         }
 
         // Optional step 5: Time sync / handshake (0304)
         AppLog.d(tag, "Executing Optional Init Step (0304)...")
-        sendCommandFrameWithRetry(gatt, Protocol.INIT_CMD_OPTIONAL, maxRetries = 1, timeoutMs = 1500L)
+        sendCommandFrameWithRetry(gatt, Protocol.INIT_CMD_OPTIONAL, maxRetries = 1, timeoutMs = 1200L)
         delay(200)
 
         _initState.value = InitState.Success
-        AppLog.i(tag, "Init sequence SUCCESS: SR16 ring initialized")
+        AppLog.i(
+            tag,
+            "Init sequence FINISHED: Ring marked Ready (rxCountSinceConnect=$rxCountSinceConnect, workingVariant=${workingVariantName ?: "none"})"
+        )
         return true
     }
 
-    // =========================================================================
-    // 4. Command Frame Transmission with Retries & Exponential Backoff
-    // =========================================================================
-
     /**
-     * Transmits a command frame over characteristic 0xB002 with single retry and exponential backoff.
+     * Frame utility delegates targeting SR16 framing protocol.
      */
-    suspend fun sendCommandFrameWithRetry(
-        gatt: BluetoothGatt,
-        payload: ByteArray,
-        maxRetries: Int = 1,
-        timeoutMs: Long = 2500L
-    ): Boolean {
-        var attempt = 0
-        var currentTimeout = timeoutMs
-
-        while (attempt <= maxRetries) {
-            attempt++
-            val ok = sendRawFrame(gatt, payload, currentTimeout)
-            if (ok) return true
-
-            if (attempt <= maxRetries) {
-                AppLog.w(tag, "Command write timed out on attempt $attempt; retrying in 1000ms with backoff...")
-                delay(1000L)
-                currentTimeout = (currentTimeout * 1.5).toLong()
-            }
-        }
-        return false
-    }
-
-    @SuppressLint("MissingPermission")
-    private suspend fun sendRawFrame(
-        gatt: BluetoothGatt,
-        payload: ByteArray,
-        timeoutMs: Long
-    ): Boolean = writeMutex.withLock {
-        val char = writeCharacteristic ?: run {
-            AppLog.e(tag, "Write characteristic 0xB002 is not configured")
-            return false
-        }
-
-        val frame = buildCommandFrame(payload)
-        val txHex = frame.joinToString(" ") { "%02X".format(it) }
-        lastTxHex = txHex
-        AppLog.lastTxHex = txHex
-
-        // Always log every TX frame as hex
-        AppLog.i(tag, "TX (${frame.size} bytes): $txHex")
-
-        val deferred = CompletableDeferred<ByteArray>()
-        pendingResponse = deferred
-
-        @Suppress("DEPRECATION")
-        char.value = frame
-        @Suppress("DEPRECATION")
-        val writeInitiated = gatt.writeCharacteristic(char)
-
-        if (!writeInitiated) {
-            AppLog.e(tag, "BLE write failed (stack rejected command) on ${char.uuid}")
-            pendingResponse = null
-            return false
-        }
-
-        val result = withTimeoutOrNull(timeoutMs) {
-            deferred.await()
-        }
-        if (result != null) {
-            val rxHex = result.joinToString(" ") { "%02X".format(it) }
-            AppLog.i(tag, "RX completed pending response (${result.size} bytes): $rxHex")
-        } else {
-            AppLog.d(tag, "No immediate notify response received within ${timeoutMs}ms; write accepted by stack")
-        }
-        pendingResponse = null
-        return true // Write was delivered; ring may send asynchronous notifications
-    }
+    fun buildCommandFrame(payload: ByteArray): ByteArray = Protocol.buildSr16Frame(payload)
+    fun verifyFrame(frame: ByteArray): Boolean = Protocol.isValidSr16Frame(frame)
+    fun extractPayload(frame: ByteArray): ByteArray = Protocol.extractSr16Payload(frame)
 }
+
