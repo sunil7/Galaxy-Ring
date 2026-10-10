@@ -193,119 +193,135 @@ class GalaxyRingBLEManager(
 
     /**
      * Discovers all services, checks 0xA00A, 0xFF00, 0x0BC0, logs characteristic properties,
-     * and sequentially subscribes to 0xB003, 0xFF02, 0xFF03, 0x0BC1, 0x0BC2 and any notify/indicate chars.
+     * FIRST enables notify on primary 0xB003 and waits for onDescriptorWrite, then safely enables
+     * secondary candidates (up to 4 total) with delays.
      */
     @SuppressLint("MissingPermission")
     suspend fun setupNotificationObserver(gatt: BluetoothGatt): Boolean {
-        AppLog.i(tag, "GATT services discovered (${gatt.services.size} total) on device ${gatt.device.address}")
+        return try {
+            val deviceAddr = try { gatt.device?.address ?: "Unknown" } catch (_: Exception) { "Unknown" }
+            AppLog.i(tag, "GATT services discovered (${gatt.services.size} total) on device $deviceAddr")
 
-        foundService0xA00A = false
-        foundWrite0xB002 = false
-        foundNotify0xB003 = false
-        foundService0xFF00 = false
-        foundChar0xFF01 = false
-        foundChar0xFF02 = false
-        foundChar0xFF03 = false
-        foundService0x0BC0 = false
-        foundChar0x0BC1 = false
-        foundChar0x0BC2 = false
-        isNotificationEnabled = false
-        writeCharacteristic = null
-        altWriteCharacteristic = null
-        notifyCharacteristic = null
-        subscribedNotifyChars.clear()
+            foundService0xA00A = false
+            foundWrite0xB002 = false
+            foundNotify0xB003 = false
+            foundService0xFF00 = false
+            foundChar0xFF01 = false
+            foundChar0xFF02 = false
+            foundChar0xFF03 = false
+            foundService0x0BC0 = false
+            foundChar0x0BC1 = false
+            foundChar0x0BC2 = false
+            isNotificationEnabled = false
+            writeCharacteristic = null
+            altWriteCharacteristic = null
+            notifyCharacteristic = null
+            subscribedNotifyChars.clear()
 
-        val candidateNotifyChars = mutableListOf<BluetoothGattCharacteristic>()
+            var primaryNotify0xB003: BluetoothGattCharacteristic? = null
+            val secondaryCandidates = mutableListOf<BluetoothGattCharacteristic>()
 
-        for (service in gatt.services) {
-            val sUuidStr = service.uuid.toString().uppercase()
-            val charSummary = service.characteristics.joinToString { ch ->
-                val pStr = buildString {
-                    if ((ch.properties and BluetoothGattCharacteristic.PROPERTY_READ) != 0) append("R ")
-                    if ((ch.properties and BluetoothGattCharacteristic.PROPERTY_WRITE) != 0) append("W ")
-                    if ((ch.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) append("WNR ")
-                    if ((ch.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0) append("N ")
-                    if ((ch.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0) append("I ")
-                }.trim()
-                "${ch.uuid}[$pStr]"
-            }
-            AppLog.d(tag, "GATT Service: ${service.uuid} -> [${charSummary.ifEmpty { "no chars" }}]")
+            for (service in gatt.services) {
+                if (Protocol.matchesShortUuid(service.uuid, "A00A")) foundService0xA00A = true
+                if (Protocol.matchesShortUuid(service.uuid, "FF00")) foundService0xFF00 = true
+                if (Protocol.matchesShortUuid(service.uuid, "0BC0")) foundService0x0BC0 = true
 
-            if (Protocol.matchesShortUuid(service.uuid, "A00A")) foundService0xA00A = true
-            if (Protocol.matchesShortUuid(service.uuid, "FF00")) foundService0xFF00 = true
-            if (Protocol.matchesShortUuid(service.uuid, "0BC0")) foundService0x0BC0 = true
-
-            for (ch in service.characteristics) {
-                if (Protocol.matchesShortUuid(ch.uuid, "B002")) {
-                    writeCharacteristic = ch
-                    foundWrite0xB002 = true
-                    logCharProperties("0xB002", ch)
-                }
-                if (Protocol.matchesShortUuid(ch.uuid, "B003")) {
-                    notifyCharacteristic = ch
-                    foundNotify0xB003 = true
-                    if (!candidateNotifyChars.contains(ch)) candidateNotifyChars.add(0, ch)
-                }
-                if (Protocol.matchesShortUuid(ch.uuid, "FF01")) {
-                    altWriteCharacteristic = ch
-                    foundChar0xFF01 = true
-                    logCharProperties("0xFF01", ch)
-                }
-                if (Protocol.matchesShortUuid(ch.uuid, "FF02")) {
-                    foundChar0xFF02 = true
-                    if (!candidateNotifyChars.contains(ch)) candidateNotifyChars.add(ch)
-                }
-                if (Protocol.matchesShortUuid(ch.uuid, "FF03")) {
-                    foundChar0xFF03 = true
-                    if (!candidateNotifyChars.contains(ch)) candidateNotifyChars.add(ch)
-                }
-                if (Protocol.matchesShortUuid(ch.uuid, "0BC1")) {
-                    foundChar0x0BC1 = true
-                    if (!candidateNotifyChars.contains(ch)) candidateNotifyChars.add(ch)
-                }
-                if (Protocol.matchesShortUuid(ch.uuid, "0BC2")) {
-                    foundChar0x0BC2 = true
-                    if (!candidateNotifyChars.contains(ch)) candidateNotifyChars.add(ch)
-                }
-
-                // If characteristic supports NOTIFY or INDICATE, add to candidate list for debug listening
-                val hasNotify = (ch.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0
-                val hasIndicate = (ch.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0
-                if ((hasNotify || hasIndicate) && !candidateNotifyChars.contains(ch)) {
-                    candidateNotifyChars.add(ch)
+                for (ch in service.characteristics) {
+                    if (Protocol.matchesShortUuid(ch.uuid, "B002")) {
+                        writeCharacteristic = ch
+                        foundWrite0xB002 = true
+                        logCharProperties("0xB002", ch)
+                    }
+                    if (Protocol.matchesShortUuid(ch.uuid, "B003")) {
+                        notifyCharacteristic = ch
+                        primaryNotify0xB003 = ch
+                        foundNotify0xB003 = true
+                        logCharProperties("0xB003", ch)
+                    }
+                    if (Protocol.matchesShortUuid(ch.uuid, "FF01")) {
+                        altWriteCharacteristic = ch
+                        foundChar0xFF01 = true
+                        logCharProperties("0xFF01", ch)
+                    }
+                    if (Protocol.matchesShortUuid(ch.uuid, "FF02")) {
+                        foundChar0xFF02 = true
+                        if (!secondaryCandidates.contains(ch)) secondaryCandidates.add(ch)
+                    }
+                    if (Protocol.matchesShortUuid(ch.uuid, "FF03")) {
+                        foundChar0xFF03 = true
+                        if (!secondaryCandidates.contains(ch)) secondaryCandidates.add(ch)
+                    }
+                    if (Protocol.matchesShortUuid(ch.uuid, "0BC1")) {
+                        foundChar0x0BC1 = true
+                        if (!secondaryCandidates.contains(ch)) secondaryCandidates.add(ch)
+                    }
+                    if (Protocol.matchesShortUuid(ch.uuid, "0BC2")) {
+                        foundChar0x0BC2 = true
+                        if (!secondaryCandidates.contains(ch)) secondaryCandidates.add(ch)
+                    }
                 }
             }
-        }
 
-        AppLog.i(
-            tag,
-            "GATT Inventory -> 0xA00A=$foundService0xA00A (0xB002=$foundWrite0xB002, 0xB003=$foundNotify0xB003); " +
-                    "0xFF00=$foundService0xFF00 (0xFF01=$foundChar0xFF01, 0xFF02=$foundChar0xFF02, 0xFF03=$foundChar0xFF03); " +
-                    "0x0BC0=$foundService0x0BC0 (0x0BC1=$foundChar0x0BC1, 0x0BC2=$foundChar0x0BC2)"
-        )
+            AppLog.i(
+                tag,
+                "GATT Inventory -> 0xA00A=$foundService0xA00A (0xB002=$foundWrite0xB002, 0xB003=$foundNotify0xB003); " +
+                        "0xFF00=$foundService0xFF00 (0xFF01=$foundChar0xFF01, 0xFF02=$foundChar0xFF02, 0xFF03=$foundChar0xFF03); " +
+                        "0x0BC0=$foundService0x0BC0 (0x0BC1=$foundChar0x0BC1, 0x0BC2=$foundChar0x0BC2)"
+            )
 
-        if (writeCharacteristic == null) {
-            AppLog.w(tag, "Primary write 0xB002 not found; checking 0xFF01 as fallback write...")
-            writeCharacteristic = altWriteCharacteristic
-        }
-
-        // Sequentially enable notifications/indications on all candidate characteristics
-        var successfullySubscribedCount = 0
-        for (char in candidateNotifyChars) {
-            val ok = enableNotificationOrIndication(gatt, char)
-            if (ok) {
-                successfullySubscribedCount++
-                subscribedNotifyChars.add(char)
+            if (writeCharacteristic == null) {
+                AppLog.w(tag, "Primary write 0xB002 not found; checking 0xFF01 as fallback write...")
+                writeCharacteristic = altWriteCharacteristic
             }
-            delay(120) // Give BLE controller spacing between CCCD operations
-        }
 
-        isNotificationEnabled = successfullySubscribedCount > 0
-        AppLog.i(
-            tag,
-            "Notification setup complete: $successfullySubscribedCount / ${candidateNotifyChars.size} characteristics listening"
-        )
-        return isNotificationEnabled
+            var successfullySubscribedCount = 0
+
+            // STEP 1: Enable notify ONLY on primary 0xB003 FIRST and wait for onDescriptorWrite
+            if (primaryNotify0xB003 != null) {
+                AppLog.i(tag, "Enabling primary 0xB003 notification and awaiting CCCD descriptor write...")
+                val b003Ok = enableNotificationOrIndication(gatt, primaryNotify0xB003)
+                if (b003Ok) {
+                    successfullySubscribedCount++
+                    subscribedNotifyChars.add(primaryNotify0xB003)
+                    isNotificationEnabled = true
+                    AppLog.i(tag, "Primary 0xB003 CCCD write confirmed SUCCESS")
+                } else {
+                    AppLog.w(tag, "Primary 0xB003 CCCD write timed out or returned failure; continuing safely")
+                }
+            } else {
+                AppLog.w(tag, "Primary 0xB003 characteristic not discovered!")
+            }
+
+            // STEP 2: Only then, optionally enable secondary characteristics one-by-one with 250ms spacing
+            // Capped at max 4 total subscribed characteristics to protect Samsung BLE stack
+            val remainingSlots = (4 - successfullySubscribedCount).coerceAtLeast(0)
+            val secondaryToSubscribe = secondaryCandidates.take(remainingSlots)
+
+            for (secChar in secondaryToSubscribe) {
+                if (secChar == primaryNotify0xB003) continue
+                delay(250) // 200-300ms spacing between CCCD operations
+                try {
+                    AppLog.d(tag, "Subscribing candidate secondary notify char: ${secChar.uuid}...")
+                    val ok = enableNotificationOrIndication(gatt, secChar)
+                    if (ok) {
+                        successfullySubscribedCount++
+                        subscribedNotifyChars.add(secChar)
+                    }
+                } catch (e: Exception) {
+                    AppLog.e(tag, "Error subscribing to secondary char ${secChar.uuid}: ${e.message}", e)
+                }
+            }
+
+            isNotificationEnabled = successfullySubscribedCount > 0
+            AppLog.i(
+                tag,
+                "Notification setup complete: $successfullySubscribedCount subscribed chars (capped at 4 max)"
+            )
+            isNotificationEnabled
+        } catch (e: Exception) {
+            AppLog.e(tag, "Exception during setupNotificationObserver: ${e.message}", e)
+            false
+        }
     }
 
     private fun logCharProperties(label: String, ch: BluetoothGattCharacteristic) {
@@ -325,56 +341,62 @@ class GalaxyRingBLEManager(
         gatt: BluetoothGatt,
         char: BluetoothGattCharacteristic
     ): Boolean {
-        val hasNotify = (char.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0
-        val hasIndicate = (char.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0
+        return try {
+            val hasNotify = (char.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0
+            val hasIndicate = (char.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0
 
-        val localOk = gatt.setCharacteristicNotification(char, true)
-        if (!localOk) {
-            AppLog.w(tag, "Failed to enable local notification on ${char.uuid}")
-            return false
-        }
+            val localOk = gatt.setCharacteristicNotification(char, true)
+            if (!localOk) {
+                AppLog.w(tag, "Failed to enable local notification on ${char.uuid}")
+                return false
+            }
 
-        val cccd = char.getDescriptor(Protocol.CCCD_UUID)
-        if (cccd == null) {
-            AppLog.d(tag, "CCCD (0x2902) not found on ${char.uuid}; local notification registered")
-            return true
-        }
+            val cccd = char.getDescriptor(Protocol.CCCD_UUID)
+            if (cccd == null) {
+                AppLog.d(tag, "CCCD (0x2902) not found on ${char.uuid}; local notification registered")
+                return true
+            }
 
-        val descriptorValue = if (hasNotify) {
-            BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-        } else if (hasIndicate) {
-            BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
-        } else {
-            BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-        }
+            val descriptorValue = if (hasNotify) {
+                BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+            } else if (hasIndicate) {
+                BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+            } else {
+                BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+            }
 
-        val def = CompletableDeferred<Int>()
-        pendingDescriptorDeferred = def
+            val def = CompletableDeferred<Int>()
+            pendingDescriptorDeferred = def
 
-        val initiated = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val res = gatt.writeDescriptor(cccd, descriptorValue)
-            res == BluetoothStatusCodes.SUCCESS
-        } else {
-            @Suppress("DEPRECATION")
-            cccd.value = descriptorValue
-            @Suppress("DEPRECATION")
-            gatt.writeDescriptor(cccd)
-        }
+            val initiated = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val res = gatt.writeDescriptor(cccd, descriptorValue)
+                res == BluetoothStatusCodes.SUCCESS
+            } else {
+                @Suppress("DEPRECATION")
+                cccd.value = descriptorValue
+                @Suppress("DEPRECATION")
+                gatt.writeDescriptor(cccd)
+            }
 
-        if (!initiated) {
-            AppLog.w(tag, "writeDescriptor rejected by Bluetooth stack for ${char.uuid}")
+            if (!initiated) {
+                AppLog.w(tag, "writeDescriptor rejected by Bluetooth stack for ${char.uuid}")
+                pendingDescriptorDeferred = null
+                return false
+            }
+
+            val status = withTimeoutOrNull(2000L) { def.await() } ?: -1
             pendingDescriptorDeferred = null
-            return false
+            val ok = status == BluetoothGatt.GATT_SUCCESS
+            AppLog.i(
+                tag,
+                "CCCD write for [${char.uuid}] -> status=$status (${if (ok) "SUCCESS" else "FAILED"}), type=${if (hasNotify) "NOTIFY" else "INDICATE"}"
+            )
+            ok
+        } catch (e: Exception) {
+            AppLog.e(tag, "Exception during enableNotificationOrIndication on ${char.uuid}: ${e.message}", e)
+            pendingDescriptorDeferred = null
+            false
         }
-
-        val status = withTimeoutOrNull(1800L) { def.await() } ?: -1
-        pendingDescriptorDeferred = null
-        val ok = status == BluetoothGatt.GATT_SUCCESS
-        AppLog.i(
-            tag,
-            "CCCD write for [${char.uuid}] -> status=$status (${if (ok) "SUCCESS" else "FAILED"}), type=${if (hasNotify) "NOTIFY" else "INDICATE"}"
-        )
-        return ok
     }
 
     // =========================================================================
@@ -385,66 +407,74 @@ class GalaxyRingBLEManager(
      * Dispatches any raw characteristic change received on ANY characteristic.
      */
     fun onNotificationReceived(characteristic: BluetoothGattCharacteristic, data: ByteArray) {
-        if (data.isEmpty()) {
-            AppLog.w(tag, "RX notification [${characteristic.uuid}] received with empty byte array")
-            return
-        }
-
-        rxCountSinceConnect++
-        _rxCountFlow.value = rxCountSinceConnect
-        AppLog.rxCountSinceConnect = rxCountSinceConnect
-
-        val hexString = data.joinToString(" ") { "%02X".format(it) }
-        lastRxHex = hexString
-        lastRxTimestamp = System.currentTimeMillis()
-        lastRxBytesCount = data.size
-        AppLog.lastRxHex = hexString
-
-        // Log EVERY onCharacteristicChanged with full UUID + hex, any service
-        AppLog.i(tag, "RX onCharacteristicChanged [${characteristic.uuid}] (${data.size} bytes): $hexString")
-        AppLog.recordRx(characteristic.uuid.toString(), hexString)
-
-        // Complete any pending command response
-        val pending = pendingResponse
-        if (pending != null && pending.isActive) {
-            AppLog.i(tag, "RX completed pending response (${data.size} bytes): $hexString")
-            pending.complete(data)
-        }
-
-        scope.launch {
-            _rawNotifications.emit(data)
-
-            // Extract payload (handles both 0xAB framed and raw)
-            val payload = Protocol.extractSr16Payload(data)
-            val payloadHex = payload.joinToString(" ") { "%02X".format(it) }
-
-            // 1. Heart Rate
-            val hr = Protocol.parseSr16HeartRate(payload) ?: Protocol.parseHeartRate(data)
-            if (hr != null) {
-                AppLog.i(tag, "HR parse SUCCESS: ${hr.bpm} BPM (payload: $payloadHex)")
-                _heartRateFlow.emit(hr)
+        try {
+            if (data.isEmpty()) {
+                AppLog.w(tag, "RX notification [${characteristic.uuid}] received with empty byte array")
+                return
             }
 
-            // 2. SpO₂
-            val spo2 = Protocol.parseSr16SpO2(payload)
-            if (spo2 != null) {
-                AppLog.i(tag, "SpO₂ parse SUCCESS: ${spo2.percentage}% (payload: $payloadHex)")
-                _spo2Flow.emit(spo2)
+            rxCountSinceConnect++
+            _rxCountFlow.value = rxCountSinceConnect
+            AppLog.rxCountSinceConnect = rxCountSinceConnect
+
+            val hexString = data.joinToString(" ") { "%02X".format(it) }
+            lastRxHex = hexString
+            lastRxTimestamp = System.currentTimeMillis()
+            lastRxBytesCount = data.size
+            AppLog.lastRxHex = hexString
+
+            // Log EVERY onCharacteristicChanged with full UUID + hex, any service
+            AppLog.i(tag, "RX onCharacteristicChanged [${characteristic.uuid}] (${data.size} bytes): $hexString")
+            AppLog.recordRx(characteristic.uuid.toString(), hexString)
+
+            // Complete any pending command response
+            val pending = pendingResponse
+            if (pending != null && pending.isActive) {
+                AppLog.i(tag, "RX completed pending response (${data.size} bytes): $hexString")
+                pending.complete(data)
             }
 
-            // 3. Steps
-            val steps = Protocol.parseSr16Steps(payload)
-            if (steps != null) {
-                AppLog.i(tag, "Steps parse SUCCESS: ${steps.totalSteps} steps (payload: $payloadHex)")
-                _stepsFlow.emit(steps)
-            }
+            scope.launch {
+                try {
+                    _rawNotifications.emit(data)
 
-            // 4. Sleep
-            val sleep = Protocol.parseSr16SleepSession(payload)
-            if (sleep != null) {
-                AppLog.i(tag, "Sleep parse SUCCESS: ${sleep.durationMinutes} min (payload: $payloadHex)")
-                _sleepFlow.emit(sleep)
+                    // Extract payload (handles both 0xAB framed and raw)
+                    val payload = Protocol.extractSr16Payload(data)
+                    val payloadHex = payload.joinToString(" ") { "%02X".format(it) }
+
+                    // 1. Heart Rate
+                    val hr = Protocol.parseSr16HeartRate(payload) ?: Protocol.parseHeartRate(data)
+                    if (hr != null) {
+                        AppLog.i(tag, "HR parse SUCCESS: ${hr.bpm} BPM (payload: $payloadHex)")
+                        _heartRateFlow.emit(hr)
+                    }
+
+                    // 2. SpO₂
+                    val spo2 = Protocol.parseSr16SpO2(payload)
+                    if (spo2 != null) {
+                        AppLog.i(tag, "SpO₂ parse SUCCESS: ${spo2.percentage}% (payload: $payloadHex)")
+                        _spo2Flow.emit(spo2)
+                    }
+
+                    // 3. Steps
+                    val steps = Protocol.parseSr16Steps(payload)
+                    if (steps != null) {
+                        AppLog.i(tag, "Steps parse SUCCESS: ${steps.totalSteps} steps (payload: $payloadHex)")
+                        _stepsFlow.emit(steps)
+                    }
+
+                    // 4. Sleep
+                    val sleep = Protocol.parseSr16SleepSession(payload)
+                    if (sleep != null) {
+                        AppLog.i(tag, "Sleep parse SUCCESS: ${sleep.durationMinutes} min (payload: $payloadHex)")
+                        _sleepFlow.emit(sleep)
+                    }
+                } catch (e: Exception) {
+                    AppLog.e(tag, "Error parsing incoming BLE payload: ${e.message}", e)
+                }
             }
+        } catch (e: Exception) {
+            AppLog.e(tag, "Exception in onNotificationReceived: ${e.message}", e)
         }
     }
 

@@ -1790,8 +1790,13 @@ fun ScanDevicesSheetContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
+                                val safeDisplayName = try {
+                                    dev.name.ifEmpty { dev.address }
+                                } catch (_: Exception) {
+                                    dev.address
+                                }
                                 Text(
-                                    text = dev.name,
+                                    text = safeDisplayName,
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold
                                 )
