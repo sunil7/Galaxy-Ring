@@ -20,5 +20,8 @@ debug.keystore.base64
 .build-outputs/
 
 # Include generated APK for GitHub release and export
-!/apk/
-!/apk/*.apk
+!apk
+!apk/
+!apk/*
+!apk/**
+!*.apk
