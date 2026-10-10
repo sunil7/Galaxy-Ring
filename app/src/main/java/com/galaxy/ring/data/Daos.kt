@@ -25,6 +25,9 @@ interface HeartRateDao {
 
     @Query("SELECT * FROM heart_rate_records ORDER BY timestamp DESC LIMIT 100")
     fun getRecentSamples(): Flow<List<HeartRateEntity>>
+
+    @Query("DELETE FROM heart_rate_records")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -46,6 +49,9 @@ interface OxygenSaturationDao {
 
     @Query("SELECT * FROM oxygen_saturation_records ORDER BY timestamp DESC LIMIT 100")
     fun getRecentSamples(): Flow<List<OxygenSaturationEntity>>
+
+    @Query("DELETE FROM oxygen_saturation_records")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -58,6 +64,9 @@ interface DailyStepsDao {
 
     @Query("SELECT * FROM daily_steps_records ORDER BY date DESC")
     fun getAllDailySteps(): Flow<List<DailyStepsEntity>>
+
+    @Query("DELETE FROM daily_steps_records")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -79,4 +88,7 @@ interface SleepDao {
 
     @Query("DELETE FROM sleep_session_records WHERE date = :date")
     suspend fun deleteForDate(date: String)
+
+    @Query("DELETE FROM sleep_session_records")
+    suspend fun deleteAll()
 }

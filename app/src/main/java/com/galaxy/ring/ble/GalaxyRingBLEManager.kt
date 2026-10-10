@@ -5,12 +5,11 @@ import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.content.Context
-import android.os.Build
-import android.util.Log
 import com.galaxy.ring.data.HeartRateSample
 import com.galaxy.ring.data.OxygenSaturationSample
 import com.galaxy.ring.data.SleepSession
 import com.galaxy.ring.data.StepData
+import com.galaxy.ring.debug.AppLog
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,7 +25,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
-import java.util.UUID
 
 /**
  * Manages low-level Bluetooth LE communication with the Galaxy Ring / SR16 smart ring.
@@ -35,6 +33,7 @@ import java.util.UUID
  * 1. Handles command frame framing (0xAB header + length + payload + CRC16-ARC checksum).
  * 2. Implements the post-connect initialization sequence (0302 -> 0202 -> 0201 -> 0263, optional 0304).
  * 3. Observes and decodes incoming notifications from characteristic 0xB003 via CCCD.
+ * 4. Logs all frames (TX/RX), discovery summaries, and parse outcomes to [AppLog].
  */
 class GalaxyRingBLEManager(
     private val context: Context,
@@ -48,6 +47,31 @@ class GalaxyRingBLEManager(
         private set
 
     var notifyCharacteristic: BluetoothGattCharacteristic? = null
+        private set
+
+    // Diagnostic & GATT Discovery State
+    var foundService0xA00A: Boolean = false
+        private set
+
+    var foundWrite0xB002: Boolean = false
+        private set
+
+    var foundNotify0xB003: Boolean = false
+        private set
+
+    var isNotificationEnabled: Boolean = false
+        private set
+
+    var lastTxHex: String? = null
+        private set
+
+    var lastRxHex: String? = null
+        private set
+
+    var lastRxTimestamp: Long = 0L
+        private set
+
+    var lastRxBytesCount: Int = 0
         private set
 
     // Concurrency control for write commands
@@ -80,6 +104,16 @@ class GalaxyRingBLEManager(
 
     private val _sleepFlow = MutableSharedFlow<SleepSession>(extraBufferCapacity = 16)
     val sleepFlow: SharedFlow<SleepSession> = _sleepFlow.asSharedFlow()
+
+    fun markNotificationEnabled(enabled: Boolean) {
+        isNotificationEnabled = enabled
+    }
+
+    fun getLastRxSince(sinceTimestamp: Long): Pair<Int, String>? {
+        return if (lastRxTimestamp >= sinceTimestamp && lastRxHex != null) {
+            Pair(lastRxBytesCount, lastRxHex!!)
+        } else null
+    }
 
     // =========================================================================
     // 1. Command Frame Encoding & Verification (0xAB + CRC16-ARC)
@@ -125,29 +159,45 @@ class GalaxyRingBLEManager(
 
     /**
      * Configures notifications for characteristic 0xB003.
-     * Finds service 0xA00A, characteristic 0xB003, enables notifications on the local GATT client,
-     * and writes ENABLE_NOTIFICATION_VALUE to the CCCD descriptor (0x2902).
+     * Logs every GATT service and characteristic UUID discovered,
+     * locates service 0xA00A, characteristic 0xB002 (write), 0xB003 (notify),
+     * enables notifications on the local GATT client, and writes CCCD.
      */
     @SuppressLint("MissingPermission")
     fun setupNotificationObserver(gatt: BluetoothGatt): Boolean {
-        Log.i(tag, "Configuring notification observer for characteristic 0xB003 on device ${gatt.device.address}")
+        AppLog.i(tag, "GATT services discovered (${gatt.services.size} total) on device ${gatt.device.address}")
+
+        // Log every GATT service + characteristic UUID after discovery
+        for (service in gatt.services) {
+            val charSummary = service.characteristics.joinToString { it.uuid.toString() }
+            AppLog.d(tag, "Discovered GATT Service: ${service.uuid} -> [${charSummary.ifEmpty { "no chars" }}]")
+        }
+
+        // Reset discovery status flags
+        foundService0xA00A = false
+        foundWrite0xB002 = false
+        foundNotify0xB003 = false
+        isNotificationEnabled = false
+        writeCharacteristic = null
+        notifyCharacteristic = null
 
         // Locate primary service 0xA00A and characteristics 0xB002 / 0xB003
-        var foundService = false
         for (service in gatt.services) {
             val sUuid = service.uuid.toString()
             if (sUuid.contains("A00A", ignoreCase = true) || service.uuid == Protocol.SR16_SERVICE_UUID) {
-                foundService = true
-                Log.d(tag, "Found SR16 service: ${service.uuid}")
+                foundService0xA00A = true
+                AppLog.i(tag, "Identified SR16 primary service 0xA00A: ${service.uuid}")
                 for (ch in service.characteristics) {
                     val cUuid = ch.uuid.toString()
                     if (cUuid.contains("B002", ignoreCase = true) || ch.uuid == Protocol.SR16_WRITE_CHAR_UUID) {
                         writeCharacteristic = ch
-                        Log.d(tag, "Identified Write characteristic: ${ch.uuid}")
+                        foundWrite0xB002 = true
+                        AppLog.i(tag, "Identified SR16 Write characteristic 0xB002: ${ch.uuid}")
                     }
                     if (cUuid.contains("B003", ignoreCase = true) || ch.uuid == Protocol.SR16_NOTIFY_CHAR_UUID) {
                         notifyCharacteristic = ch
-                        Log.d(tag, "Identified Notify characteristic: ${ch.uuid}")
+                        foundNotify0xB003 = true
+                        AppLog.i(tag, "Identified SR16 Notify characteristic 0xB003: ${ch.uuid}")
                     }
                 }
             }
@@ -155,50 +205,65 @@ class GalaxyRingBLEManager(
 
         // Broad fallback scan across all services if not found
         if (writeCharacteristic == null || notifyCharacteristic == null) {
-            Log.w(tag, "Scanning all GATT characteristics for 0xB002 / 0xB003 fallback...")
+            AppLog.w(tag, "0xB002 or 0xB003 not in 0xA00A; scanning all services as fallback...")
             for (service in gatt.services) {
                 for (ch in service.characteristics) {
                     val cUuid = ch.uuid.toString()
                     if (writeCharacteristic == null && (cUuid.contains("B002", ignoreCase = true) || ch.uuid == Protocol.SR16_WRITE_CHAR_UUID)) {
                         writeCharacteristic = ch
+                        foundWrite0xB002 = true
+                        AppLog.i(tag, "Found Write characteristic 0xB002 via fallback: ${ch.uuid}")
                     }
                     if (notifyCharacteristic == null && (cUuid.contains("B003", ignoreCase = true) || ch.uuid == Protocol.SR16_NOTIFY_CHAR_UUID)) {
                         notifyCharacteristic = ch
+                        foundNotify0xB003 = true
+                        AppLog.i(tag, "Found Notify characteristic 0xB003 via fallback: ${ch.uuid}")
                     }
                 }
             }
         }
 
+        // Log whether 0xB002 / 0xB003 were found
+        AppLog.i(
+            tag,
+            "GATT Summary -> Service 0xA00A: $foundService0xA00A, Write 0xB002: $foundWrite0xB002, Notify 0xB003: $foundNotify0xB003"
+        )
+
         val nChar = notifyCharacteristic
         if (nChar == null) {
-            Log.e(tag, "Failed to locate notify characteristic 0xB003 on ${gatt.device.address}")
+            val err = "Failed to locate notify characteristic 0xB003 on ${gatt.device.address}"
+            AppLog.e(tag, err)
             return false
         }
 
         // 1. Enable local notification subscription in Android Bluetooth Stack
         val successLocal = gatt.setCharacteristicNotification(nChar, true)
         if (!successLocal) {
-            Log.e(tag, "Failed to enable local characteristic notification on ${nChar.uuid}")
+            val err = "Failed to enable local characteristic notification on ${nChar.uuid}"
+            AppLog.e(tag, err)
             return false
         }
 
         // 2. Enable remote notification via CCCD (Client Characteristic Configuration Descriptor 0x2902)
         val descriptor = nChar.getDescriptor(Protocol.CCCD_UUID)
         if (descriptor != null) {
-            Log.d(tag, "Writing ENABLE_NOTIFICATION_VALUE to CCCD ${descriptor.uuid}...")
+            AppLog.d(tag, "Writing ENABLE_NOTIFICATION_VALUE to CCCD ${descriptor.uuid}...")
             @Suppress("DEPRECATION")
             descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
             @Suppress("DEPRECATION")
             val initiated = gatt.writeDescriptor(descriptor)
             if (!initiated) {
-                Log.e(tag, "Failed to initiate writeDescriptor for CCCD on 0xB003")
+                val err = "Failed to initiate writeDescriptor for CCCD on 0xB003"
+                AppLog.e(tag, err)
                 return false
             }
+            isNotificationEnabled = true
         } else {
-            Log.w(tag, "CCCD descriptor (0x2902) not found on characteristic ${nChar.uuid}")
+            AppLog.w(tag, "CCCD descriptor (0x2902) not found on characteristic ${nChar.uuid}")
+            isNotificationEnabled = true // Local set, descriptor might be auto-subscribed or not exposed
         }
 
-        Log.i(tag, "Notification observer successfully registered on 0xB003")
+        AppLog.i(tag, "Notification observer successfully configured on 0xB003")
         return true
     }
 
@@ -207,15 +272,24 @@ class GalaxyRingBLEManager(
      * Decodes the SR16 framing and emits parsed models into corresponding SharedFlows.
      */
     fun onNotificationReceived(characteristic: BluetoothGattCharacteristic, data: ByteArray) {
-        if (data.isEmpty()) return
+        if (data.isEmpty()) {
+            AppLog.w(tag, "0xB003 Notification received with empty byte array")
+            return
+        }
 
         val hexString = data.joinToString(" ") { "%02X".format(it) }
-        Log.d(tag, "0xB003 Notification received (${data.size} bytes): $hexString")
+        lastRxHex = hexString
+        lastRxTimestamp = System.currentTimeMillis()
+        lastRxBytesCount = data.size
+        AppLog.lastRxHex = hexString
+
+        // Always log every RX / notification as hex (even if parse fails)
+        AppLog.d(tag, "0xB003 RX Notification (${data.size} bytes): $hexString")
 
         // Complete any pending command response awaiter and log RX
         val pending = pendingResponse
         if (pending != null && pending.isActive) {
-            Log.i(tag, "RX completed deferred (${data.size} bytes): $hexString")
+            AppLog.i(tag, "RX completed pending response (${data.size} bytes): $hexString")
             pending.complete(data)
         }
 
@@ -224,29 +298,42 @@ class GalaxyRingBLEManager(
 
             // Extract payload from 0xAB frame
             val payload = extractPayload(data)
+            val payloadHex = payload.joinToString(" ") { "%02X".format(it) }
 
             // 1. Parse Heart Rate (CMD 02 24)
-            Protocol.parseSr16HeartRate(payload)?.let { hr ->
-                Log.d(tag, "Decoded Heart Rate sample: ${hr.bpm} BPM")
+            val hr = Protocol.parseSr16HeartRate(payload)
+            if (hr != null) {
+                AppLog.i(tag, "HR parse SUCCESS: ${hr.bpm} BPM (payload: $payloadHex)")
                 _heartRateFlow.emit(hr)
+            } else {
+                AppLog.d(tag, "HR parse: no matching HR record in payload")
             }
 
             // 2. Parse SpO₂ (CMD 02 4E)
-            Protocol.parseSr16SpO2(payload)?.let { spo2 ->
-                Log.d(tag, "Decoded SpO₂ sample: ${spo2.percentage}%")
+            val spo2 = Protocol.parseSr16SpO2(payload)
+            if (spo2 != null) {
+                AppLog.i(tag, "SpO₂ parse SUCCESS: ${spo2.percentage}% (payload: $payloadHex)")
                 _spo2Flow.emit(spo2)
+            } else {
+                AppLog.d(tag, "SpO₂ parse: no matching SpO₂ record in payload")
             }
 
             // 3. Parse Steps (CMD 05 1A)
-            Protocol.parseSr16Steps(payload)?.let { steps ->
-                Log.d(tag, "Decoded Steps data: ${steps.totalSteps}")
+            val steps = Protocol.parseSr16Steps(payload)
+            if (steps != null) {
+                AppLog.i(tag, "Steps parse SUCCESS: ${steps.totalSteps} steps (payload: $payloadHex)")
                 _stepsFlow.emit(steps)
+            } else {
+                AppLog.d(tag, "Steps parse: no matching Steps record in payload")
             }
 
             // 4. Parse Sleep (CMD 05 1B)
-            Protocol.parseSr16SleepSession(payload)?.let { sleep ->
-                Log.d(tag, "Decoded Sleep session: ${sleep.durationMinutes} min")
+            val sleep = Protocol.parseSr16SleepSession(payload)
+            if (sleep != null) {
+                AppLog.i(tag, "Sleep parse SUCCESS: ${sleep.durationMinutes} min (payload: $payloadHex)")
                 _sleepFlow.emit(sleep)
+            } else {
+                AppLog.d(tag, "Sleep parse: no matching Sleep record in payload")
             }
         }
     }
@@ -264,7 +351,7 @@ class GalaxyRingBLEManager(
      * Followed by optional Step 5: 0304 (Time sync/handshake)
      */
     suspend fun runInitializationSequence(gatt: BluetoothGatt): Boolean {
-        Log.i(tag, "Starting SR16 Ring Initialization Sequence (0302 -> 0202 -> 0201 -> 0263)...")
+        AppLog.i(tag, "Init sequence START: (0302 -> 0202 -> 0201 -> 0263)...")
 
         val steps = listOf(
             Triple(Protocol.INIT_CMD_1, 1, "System Handshake (0302)"),
@@ -275,25 +362,26 @@ class GalaxyRingBLEManager(
 
         for ((cmd, stepNum, description) in steps) {
             _initState.value = InitState.InProgress(stepNum, steps.size, description)
-            Log.d(tag, "Executing Init Step $stepNum/${steps.size}: $description")
+            AppLog.d(tag, "Init Step $stepNum/${steps.size} START: $description")
 
             val ok = sendCommandFrameWithRetry(gatt, cmd, maxRetries = 1, timeoutMs = 2500L)
             if (!ok) {
-                val err = "Initialization failed at Step $stepNum ($description): Timeout or write rejected"
-                Log.e(tag, err)
+                val err = "Init Step $stepNum FAILED ($description): Timeout or write rejected"
+                AppLog.e(tag, err)
                 _initState.value = InitState.Failed(err)
                 return false
             }
+            AppLog.d(tag, "Init Step $stepNum SUCCESS: $description")
             delay(350)
         }
 
         // Optional step 5: Time sync / handshake (0304)
-        Log.d(tag, "Executing Optional Init Step (0304)...")
+        AppLog.d(tag, "Executing Optional Init Step (0304)...")
         sendCommandFrameWithRetry(gatt, Protocol.INIT_CMD_OPTIONAL, maxRetries = 1, timeoutMs = 1500L)
         delay(200)
 
         _initState.value = InitState.Success
-        Log.i(tag, "Initialization Sequence completed successfully!")
+        AppLog.i(tag, "Init sequence SUCCESS: SR16 ring initialized")
         return true
     }
 
@@ -319,7 +407,7 @@ class GalaxyRingBLEManager(
             if (ok) return true
 
             if (attempt <= maxRetries) {
-                Log.w(tag, "Command timed out on attempt $attempt; retrying in 1000ms with exponential backoff...")
+                AppLog.w(tag, "Command write timed out on attempt $attempt; retrying in 1000ms with backoff...")
                 delay(1000L)
                 currentTimeout = (currentTimeout * 1.5).toLong()
             }
@@ -334,13 +422,17 @@ class GalaxyRingBLEManager(
         timeoutMs: Long
     ): Boolean = writeMutex.withLock {
         val char = writeCharacteristic ?: run {
-            Log.e(tag, "Write characteristic 0xB002 is not configured")
+            AppLog.e(tag, "Write characteristic 0xB002 is not configured")
             return false
         }
 
         val frame = buildCommandFrame(payload)
         val txHex = frame.joinToString(" ") { "%02X".format(it) }
-        Log.i(tag, "TX (${frame.size} bytes): $txHex")
+        lastTxHex = txHex
+        AppLog.lastTxHex = txHex
+
+        // Always log every TX frame as hex
+        AppLog.i(tag, "TX (${frame.size} bytes): $txHex")
 
         val deferred = CompletableDeferred<ByteArray>()
         pendingResponse = deferred
@@ -351,7 +443,7 @@ class GalaxyRingBLEManager(
         val writeInitiated = gatt.writeCharacteristic(char)
 
         if (!writeInitiated) {
-            Log.e(tag, "Failed to initiate writeCharacteristic on ${char.uuid}")
+            AppLog.e(tag, "BLE write failed (stack rejected command) on ${char.uuid}")
             pendingResponse = null
             return false
         }
@@ -361,9 +453,9 @@ class GalaxyRingBLEManager(
         }
         if (result != null) {
             val rxHex = result.joinToString(" ") { "%02X".format(it) }
-            Log.i(tag, "RX completed pending response (${result.size} bytes): $rxHex")
+            AppLog.i(tag, "RX completed pending response (${result.size} bytes): $rxHex")
         } else {
-            Log.d(tag, "No immediate notify response received within ${timeoutMs}ms; write accepted by stack")
+            AppLog.d(tag, "No immediate notify response received within ${timeoutMs}ms; write accepted by stack")
         }
         pendingResponse = null
         return true // Write was delivered; ring may send asynchronous notifications

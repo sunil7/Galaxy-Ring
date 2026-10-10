@@ -12,7 +12,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -137,8 +140,21 @@ fun MainScreen(
     var syncStatus by remember { mutableStateOf<SyncStatus>(SyncStatus.Idle) }
     var showScanSheet by remember { mutableStateOf(false) }
     var isFindingRing by remember { mutableStateOf(false) }
+    var showAdminScreen by remember { mutableStateOf(false) }
 
     val bottomSheetState = rememberModalBottomSheetState()
+
+    LaunchedEffect(measurementState) {
+        val current = measurementState
+        if (current is ManualMeasurementState.Error) {
+            snackbarHostState.showSnackbar(current.message)
+        }
+    }
+
+    if (showAdminScreen) {
+        AdminScreen(onNavigateBack = { showAdminScreen = false })
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -149,7 +165,8 @@ fun MainScreen(
                     onRequestBlePermissions()
                     bleRepo.startScan()
                     showScanSheet = true
-                }
+                },
+                onAdminClick = { showAdminScreen = true }
             )
         },
         bottomBar = {
@@ -239,7 +256,8 @@ fun MainScreen(
                         },
                         onRequestPermissions = onRequestHealthPermissions,
                         onOpenRationale = onOpenRationale,
-                        onNavigateToSleep = { selectedTab = 2 }
+                        onNavigateToSleep = { selectedTab = 2 },
+                        onOpenAdmin = { showAdminScreen = true }
                     )
                 }
                 1 -> {
@@ -251,7 +269,8 @@ fun MainScreen(
                 3 -> {
                     SettingsScreen(
                         onOpenHealthRationale = onOpenRationale,
-                        hasHealthPermissions = hasHealthPermissions
+                        hasHealthPermissions = hasHealthPermissions,
+                        onOpenAdmin = { showAdminScreen = true }
                     )
                 }
             }
@@ -298,7 +317,8 @@ fun DeviceDashboard(
     onSyncNow: () -> Unit,
     onRequestPermissions: () -> Unit,
     onOpenRationale: () -> Unit,
-    onNavigateToSleep: () -> Unit
+    onNavigateToSleep: () -> Unit,
+    onOpenAdmin: () -> Unit = {}
 ) {
     val isReady = connectionState is ConnectionState.Ready || connectionState is ConnectionState.Connected
 
@@ -334,7 +354,8 @@ fun DeviceDashboard(
                 latestHeartRate = snapshot.latestHeartRate,
                 latestSpo2 = snapshot.latestOxygenSaturation,
                 onMeasureHeartRate = onMeasureHeartRate,
-                onMeasureSpo2 = onMeasureSpo2
+                onMeasureSpo2 = onMeasureSpo2,
+                onOpenAdmin = onOpenAdmin
             )
         }
 
@@ -496,7 +517,8 @@ fun ManualMeasurementsCard(
     latestHeartRate: HeartRateSample,
     latestSpo2: OxygenSaturationSample?,
     onMeasureHeartRate: () -> Unit,
-    onMeasureSpo2: () -> Unit
+    onMeasureSpo2: () -> Unit,
+    onOpenAdmin: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -590,25 +612,43 @@ fun ManualMeasurementsCard(
                 }
                 Spacer(modifier = Modifier.height(14.dp))
             } else if (measurementState is ManualMeasurementState.Error) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
                         .background(RosePulse.copy(alpha = 0.12f))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(12.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Error,
-                        contentDescription = null,
-                        tint = RosePulse,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Error,
+                            contentDescription = null,
+                            tint = RosePulse,
+                            modifier = Modifier
+                                .size(18.dp)
+                                .padding(top = 2.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = measurementState.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                            color = RosePulse,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = measurementState.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = RosePulse
+                        text = "→ View TX/RX hex & export logs in Admin / Debug",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = CyberCyan,
+                        modifier = Modifier
+                            .clickable { onOpenAdmin() }
+                            .padding(start = 26.dp)
                     )
                 }
                 Spacer(modifier = Modifier.height(14.dp))
@@ -857,11 +897,19 @@ fun Spo2Card(
 fun GalaxyRingTopBar(
     connectionState: ConnectionState,
     snapshot: RingHealthSnapshot,
-    onScanClick: () -> Unit
+    onScanClick: () -> Unit,
+    onAdminClick: () -> Unit = {}
 ) {
     TopAppBar(
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.pointerInput(Unit) {
+                    detectTapGestures(
+                        onLongPress = { onAdminClick() }
+                    )
+                }
+            ) {
                 Box(
                     modifier = Modifier
                         .size(32.dp)

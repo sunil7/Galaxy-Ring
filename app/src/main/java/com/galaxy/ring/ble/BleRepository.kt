@@ -16,7 +16,6 @@ import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import com.galaxy.ring.data.ConnectionState
 import com.galaxy.ring.data.HeartRateSample
 import com.galaxy.ring.data.ManualMeasurementState
@@ -29,6 +28,7 @@ import com.galaxy.ring.data.SkinTemperature
 import com.galaxy.ring.data.SleepAnalyzer
 import com.galaxy.ring.data.SleepSession
 import com.galaxy.ring.data.StepData
+import com.galaxy.ring.debug.AppLog
 import com.galaxy.ring.health.HealthConnectWriter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,8 +42,8 @@ import kotlinx.coroutines.launch
 
 class BleRepository(
     private val context: Context,
-    private val healthRepository: RingHealthRepository,
-    private val healthWriter: HealthConnectWriter
+    val healthRepository: RingHealthRepository,
+    val healthWriter: HealthConnectWriter
 ) {
 
     private val tagBle = "GalaxyRingBLE"
@@ -60,6 +60,12 @@ class BleRepository(
     val bleManager = GalaxyRingBLEManager(context, scope)
 
     private var currentGatt: BluetoothGatt? = null
+
+    val currentGattAddress: String?
+        get() = currentGatt?.device?.address ?: healthRepository.lastConnectedAddress
+
+    val currentGattName: String?
+        get() = currentGatt?.device?.name ?: healthRepository.lastConnectedName
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -78,13 +84,6 @@ class BleRepository(
     private var isUserDisconnect = false
 
     init {
-        // Compute initial sleep analysis if available
-        val initialSleep = _snapshot.value.latestSleep
-        if (initialSleep != null) {
-            val analysis = SleepAnalyzer.analyze(initialSleep, (healthRepository.sleepTargetHours * 60).toLong())
-            _snapshot.value = _snapshot.value.copy(latestSleepAnalysis = analysis)
-        }
-
         // Observe decoded biometric data from GalaxyRingBLEManager
         observeBLEManagerData()
     }
@@ -93,7 +92,7 @@ class BleRepository(
         // 1. Observe Heart Rate
         scope.launch {
             bleManager.heartRateFlow.collect { hr ->
-                Log.i(tagSync, "Heart Rate received from BLEManager: ${hr.bpm} BPM")
+                AppLog.i(tagSync, "Heart Rate received from BLEManager: ${hr.bpm} BPM")
                 val updatedHistory = _snapshot.value.heartRateHistory.toMutableList().apply {
                     add(hr)
                     if (size > 25) removeAt(0)
@@ -111,7 +110,7 @@ class BleRepository(
         // 2. Observe SpO₂
         scope.launch {
             bleManager.spo2Flow.collect { spo2 ->
-                Log.i(tagSync, "SpO₂ received from BLEManager: ${spo2.percentage}%")
+                AppLog.i(tagSync, "SpO₂ received from BLEManager: ${spo2.percentage}%")
                 val updatedHistory = _snapshot.value.oxygenSaturationHistory.toMutableList().apply {
                     add(spo2)
                     if (size > 25) removeAt(0)
@@ -129,7 +128,7 @@ class BleRepository(
         // 3. Observe Steps
         scope.launch {
             bleManager.stepsFlow.collect { steps ->
-                Log.i(tagSync, "Steps received from BLEManager: ${steps.totalSteps}")
+                AppLog.i(tagSync, "Steps received from BLEManager: ${steps.totalSteps}")
                 _snapshot.value = _snapshot.value.copy(steps = steps)
                 healthRepository.saveDailySteps(steps = steps.totalSteps, calories = steps.caloriesKcal, distanceMeters = steps.distanceMeters)
                 healthWriter.writeSteps(steps)
@@ -139,7 +138,7 @@ class BleRepository(
         // 4. Observe Sleep Sessions
         scope.launch {
             bleManager.sleepFlow.collect { sleep ->
-                Log.i(tagSleep, "Sleep session received from BLEManager: ${sleep.durationMinutes} min")
+                AppLog.i(tagSleep, "Sleep session received from BLEManager: ${sleep.durationMinutes} min")
                 val analysis = SleepAnalyzer.analyze(sleep, (healthRepository.sleepTargetHours * 60).toLong())
                 _snapshot.value = _snapshot.value.copy(latestSleep = sleep, latestSleepAnalysis = analysis)
                 healthRepository.saveSleepSession(sleep)
@@ -153,12 +152,14 @@ class BleRepository(
                 when (state) {
                     is GalaxyRingBLEManager.InitState.InProgress -> {
                         _connectionState.value = ConnectionState.Initializing(state.currentStep, state.totalSteps)
+                        AppLog.i(tagBle, "Initialization in progress: Step ${state.currentStep}/${state.totalSteps}")
                     }
                     is GalaxyRingBLEManager.InitState.Failed -> {
                         _connectionState.value = ConnectionState.Error(state.error)
+                        AppLog.e(tagBle, "Initialization sequence failed: ${state.error}")
                     }
                     is GalaxyRingBLEManager.InitState.Success -> {
-                        // Handshake complete
+                        AppLog.i(tagBle, "Initialization sequence complete")
                     }
                     is GalaxyRingBLEManager.InitState.Idle -> {}
                 }
@@ -208,6 +209,7 @@ class BleRepository(
                 currentList[existingIndex] = item
             } else {
                 if (isRing) {
+                    AppLog.i(tagBle, "Discovered Smart Ring candidate: $deviceName ($address) RSSI=${result.rssi}")
                     currentList.add(0, item)
                 } else {
                     currentList.add(item)
@@ -217,7 +219,8 @@ class BleRepository(
         }
 
         override fun onScanFailed(errorCode: Int) {
-            Log.e(tagBle, "Scan failed with error code: $errorCode")
+            val err = "BLE scan failed with error code: $errorCode"
+            AppLog.e(tagBle, err)
             _connectionState.value = ConnectionState.Error("BLE scan failed ($errorCode)")
         }
     }
@@ -226,13 +229,15 @@ class BleRepository(
     fun startScan() {
         val adapter = bluetoothAdapter
         if (adapter == null || !adapter.isEnabled) {
-            Log.w(tagBle, "Bluetooth is disabled or unavailable")
+            val msg = "Bluetooth is disabled or unavailable"
+            AppLog.w(tagBle, msg)
             _discoveredDevices.value = emptyList()
             _connectionState.value = ConnectionState.Error("Bluetooth is off")
             return
         }
 
         try {
+            AppLog.i(tagBle, "Starting BLE discovery scan...")
             _discoveredDevices.value = emptyList()
             _connectionState.value = ConnectionState.Scanning
             val scanner = adapter.bluetoothLeScanner
@@ -247,7 +252,7 @@ class BleRepository(
                 stopScan()
             }, 15000)
         } catch (e: Exception) {
-            Log.e(tagBle, "Failed to start BLE scan", e)
+            AppLog.e(tagBle, "Failed to start BLE scan: ${e.message}", e)
             _connectionState.value = ConnectionState.Error("Scan error: ${e.message}")
         }
     }
@@ -255,12 +260,13 @@ class BleRepository(
     @SuppressLint("MissingPermission")
     fun stopScan() {
         try {
+            AppLog.d(tagBle, "Stopping BLE scan")
             bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
             if (_connectionState.value is ConnectionState.Scanning) {
                 _connectionState.value = ConnectionState.Disconnected
             }
         } catch (e: Exception) {
-            Log.e(tagBle, "Error stopping scan", e)
+            AppLog.e(tagBle, "Error stopping scan: ${e.message}", e)
         }
     }
 
@@ -270,14 +276,16 @@ class BleRepository(
         reconnectJob?.cancel()
         stopScan()
         _connectionState.value = ConnectionState.Connecting(deviceName)
+        AppLog.i(tagBle, "Initiating connection to $deviceName at $address...")
 
         healthRepository.lastConnectedAddress = address
         healthRepository.lastConnectedName = deviceName
 
         val adapter = bluetoothAdapter
         if (adapter == null || !adapter.isEnabled) {
-            Log.w(tagBle, "Cannot connect: Bluetooth is disabled or unavailable")
-            _connectionState.value = ConnectionState.Error("Bluetooth is off")
+            val msg = "Bluetooth is off"
+            AppLog.w(tagBle, "Cannot connect: $msg")
+            _connectionState.value = ConnectionState.Error(msg)
             return
         }
 
@@ -291,13 +299,15 @@ class BleRepository(
                 BluetoothDevice.TRANSPORT_LE
             )
         } catch (e: Exception) {
-            Log.e(tagBle, "Connection failed to $address", e)
-            _connectionState.value = ConnectionState.Error("Connection error: ${e.message}")
+            val err = "Connection error: ${e.message}"
+            AppLog.e(tagBle, "Failed to connect to $address: ${e.message}", e)
+            _connectionState.value = ConnectionState.Error(err)
         }
     }
 
     @SuppressLint("MissingPermission")
     fun disconnect() {
+        AppLog.i(tagBle, "User requested disconnect from ring")
         isUserDisconnect = true
         reconnectJob?.cancel()
         stopSimulation()
@@ -305,7 +315,7 @@ class BleRepository(
             currentGatt?.disconnect()
             currentGatt?.close()
         } catch (e: Exception) {
-            Log.e(tagBle, "Error disconnecting GATT", e)
+            AppLog.e(tagBle, "Error during GATT disconnect: ${e.message}", e)
         }
         currentGatt = null
         _connectionState.value = ConnectionState.Disconnected
@@ -319,7 +329,7 @@ class BleRepository(
             // 1. Run Initialization Sequence (0302 -> 0202 -> 0201 -> 0263) via GalaxyRingBLEManager
             val initSuccess = bleManager.runInitializationSequence(gatt)
             if (!initSuccess) {
-                Log.e(tagBle, "Post-connection initialization sequence aborted")
+                AppLog.e(tagBle, "Post-connection initialization sequence aborted")
                 return@launch
             }
 
@@ -344,27 +354,66 @@ class BleRepository(
             delay(200)
 
             _connectionState.value = ConnectionState.Ready(device)
-            Log.i(tagBle, "SR16 Ring is successfully INITIALIZED and READY.")
+            AppLog.i(tagBle, "SR16 Ring is successfully INITIALIZED and READY.")
         }
     }
 
-    fun measureHeartRate() {
-        val state = _connectionState.value
+    private fun validateMeasurementPrerequisites(metric: String): String? {
         val gatt = currentGatt
-        if (state !is ConnectionState.Ready || gatt == null) {
+        if (gatt == null) {
+            return "No BLE connection. Connect the ring first."
+        }
+        val state = _connectionState.value
+        if (state !is ConnectionState.Ready) {
+            val stateLabel = when (state) {
+                is ConnectionState.Connecting -> "Connecting"
+                is ConnectionState.Initializing -> "Initializing"
+                is ConnectionState.Scanning -> "Scanning"
+                is ConnectionState.Syncing -> "Syncing"
+                is ConnectionState.Connected -> "Connected (Handshake pending)"
+                is ConnectionState.Error -> "Error"
+                else -> "Disconnected"
+            }
+            return "Not ready (state=$stateLabel). Wait until Ready."
+        }
+        if (bleManager.writeCharacteristic == null) {
+            return "Write characteristic 0xB002 not found. Wrong device or GATT discovery failed."
+        }
+        if (!bleManager.isNotificationEnabled || bleManager.notifyCharacteristic == null) {
+            return "Notifications on 0xB003 not enabled."
+        }
+        return null
+    }
+
+    fun measureHeartRate() {
+        val prereqError = validateMeasurementPrerequisites("Heart Rate")
+        if (prereqError != null) {
+            AppLog.e(tagBle, "Measure Heart Rate rejected: $prereqError")
+            AppLog.lastMeasureResult = "Heart Rate: Error - $prereqError"
             _manualMeasurementState.value = ManualMeasurementState.Error(
                 metric = "Heart Rate",
-                message = "Ring must be READY to measure"
+                message = prereqError
             )
             return
         }
 
+        val gatt = currentGatt ?: return
         scope.launch {
             _manualMeasurementState.value = ManualMeasurementState.Measuring("Heart Rate", progress = 0.05f)
             val startTime = System.currentTimeMillis()
-            Log.i(tagBle, "Sending manual Heart Rate measurement command (CMD 02 24)...")
+            AppLog.i(tagBle, "Measure Heart Rate START (CMD 02 24)")
 
-            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_HEART_RATE, timeoutMs = 3000L)
+            val writeOk = bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_HEART_RATE, timeoutMs = 3000L)
+            if (!writeOk) {
+                val writeErr = "BLE write failed (stack rejected command)."
+                AppLog.e(tagBle, "Measure Heart Rate write error: $writeErr")
+                AppLog.lastMeasureResult = "Heart Rate: Error - $writeErr"
+                _manualMeasurementState.value = ManualMeasurementState.Error(
+                    metric = "Heart Rate",
+                    message = writeErr
+                )
+                return@launch
+            }
 
             val maxWaitMs = 20000L
             val pollStepMs = 500L
@@ -374,7 +423,7 @@ class BleRepository(
             for (step in 1..totalSteps) {
                 delay(pollStepMs)
                 val latest = _snapshot.value.latestHeartRate
-                if (latest.timestamp > startTime && latest.bpm in 30..240) {
+                if (latest.timestamp >= startTime && latest.bpm in 30..240) {
                     sampleFound = latest
                     break
                 }
@@ -387,39 +436,68 @@ class BleRepository(
             if (sampleFound != null) {
                 healthRepository.saveHeartRate(bpm = sampleFound.bpm, timestamp = sampleFound.timestamp, isManual = true)
                 healthWriter.writeHeartRateSample(sampleFound, isManual = true)
+                val displayStr = "${sampleFound.bpm} BPM"
                 _manualMeasurementState.value = ManualMeasurementState.Success(
                     metric = "Heart Rate",
-                    displayValue = "${sampleFound.bpm} BPM",
+                    displayValue = displayStr,
                     timestamp = sampleFound.timestamp
                 )
-                Log.i(tagBle, "Manual Heart Rate measurement succeeded: ${sampleFound.bpm} BPM")
+                AppLog.lastMeasureResult = "Heart Rate: $displayStr (Success)"
+                AppLog.i(tagBle, "Manual Heart Rate measurement succeeded: $displayStr")
             } else {
-                Log.w(tagBle, "Manual Heart Rate measurement timed out after ${maxWaitMs / 1000}s")
+                val rxSince = bleManager.getLastRxSince(startTime)
+                val errorReason = if (rxSince != null) {
+                    val (byteCount, hex) = rxSince
+                    val truncatedHex = if (hex.length > 36) hex.take(33) + "…" else hex
+                    "Ring replied ($byteCount bytes) but HR/SpO₂ parse failed. Last RX: $truncatedHex. Export logs."
+                } else {
+                    val lastKnownRx = bleManager.lastRxHex
+                    if (lastKnownRx != null) {
+                        val truncatedHex = if (lastKnownRx.length > 36) lastKnownRx.take(33) + "…" else lastKnownRx
+                        "No notify from ring within 20s. Last RX: $truncatedHex. See Admin → Logs for TX/RX hex."
+                    } else {
+                        "No notify from ring within 20s. See Admin → Logs for TX/RX hex."
+                    }
+                }
+                AppLog.w(tagBle, "Manual Heart Rate measurement TIMEOUT (20s): $errorReason")
+                AppLog.lastMeasureResult = "Heart Rate: Error - $errorReason"
                 _manualMeasurementState.value = ManualMeasurementState.Error(
                     metric = "Heart Rate",
-                    message = "No response from ring (check logcat GalaxyRingBLE for TX/RX hex)"
+                    message = errorReason
                 )
             }
         }
     }
 
     fun measureOxygenSaturation() {
-        val state = _connectionState.value
-        val gatt = currentGatt
-        if (state !is ConnectionState.Ready || gatt == null) {
+        val prereqError = validateMeasurementPrerequisites("SpO₂")
+        if (prereqError != null) {
+            AppLog.e(tagBle, "Measure SpO₂ rejected: $prereqError")
+            AppLog.lastMeasureResult = "SpO₂: Error - $prereqError"
             _manualMeasurementState.value = ManualMeasurementState.Error(
                 metric = "SpO₂",
-                message = "Ring must be READY to measure"
+                message = prereqError
             )
             return
         }
 
+        val gatt = currentGatt ?: return
         scope.launch {
             _manualMeasurementState.value = ManualMeasurementState.Measuring("SpO₂", progress = 0.05f)
             val startTime = System.currentTimeMillis()
-            Log.i(tagBle, "Sending manual SpO₂ measurement command (CMD 02 4E)...")
+            AppLog.i(tagBle, "Measure SpO₂ START (CMD 02 4E)")
 
-            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_SPO2, timeoutMs = 3000L)
+            val writeOk = bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_SPO2, timeoutMs = 3000L)
+            if (!writeOk) {
+                val writeErr = "BLE write failed (stack rejected command)."
+                AppLog.e(tagBle, "Measure SpO₂ write error: $writeErr")
+                AppLog.lastMeasureResult = "SpO₂: Error - $writeErr"
+                _manualMeasurementState.value = ManualMeasurementState.Error(
+                    metric = "SpO₂",
+                    message = writeErr
+                )
+                return@launch
+            }
 
             val maxWaitMs = 20000L
             val pollStepMs = 500L
@@ -429,7 +507,7 @@ class BleRepository(
             for (step in 1..totalSteps) {
                 delay(pollStepMs)
                 val latest = _snapshot.value.latestOxygenSaturation
-                if (latest != null && latest.timestamp > startTime && latest.percentage in 70f..100f) {
+                if (latest != null && latest.timestamp >= startTime && latest.percentage in 70f..100f) {
                     sampleFound = latest
                     break
                 }
@@ -442,17 +520,34 @@ class BleRepository(
             if (sampleFound != null) {
                 healthRepository.saveOxygenSaturation(percentage = sampleFound.percentage, timestamp = sampleFound.timestamp, isManual = true)
                 healthWriter.writeOxygenSaturationSample(sampleFound, isManual = true)
+                val displayStr = "${sampleFound.percentage.toInt()}%"
                 _manualMeasurementState.value = ManualMeasurementState.Success(
                     metric = "SpO₂",
-                    displayValue = "${sampleFound.percentage.toInt()}%",
+                    displayValue = displayStr,
                     timestamp = sampleFound.timestamp
                 )
-                Log.i(tagBle, "Manual SpO₂ measurement succeeded: ${sampleFound.percentage.toInt()}%")
+                AppLog.lastMeasureResult = "SpO₂: $displayStr (Success)"
+                AppLog.i(tagBle, "Manual SpO₂ measurement succeeded: $displayStr")
             } else {
-                Log.w(tagBle, "Manual SpO₂ measurement timed out after ${maxWaitMs / 1000}s")
+                val rxSince = bleManager.getLastRxSince(startTime)
+                val errorReason = if (rxSince != null) {
+                    val (byteCount, hex) = rxSince
+                    val truncatedHex = if (hex.length > 36) hex.take(33) + "…" else hex
+                    "Ring replied ($byteCount bytes) but HR/SpO₂ parse failed. Last RX: $truncatedHex. Export logs."
+                } else {
+                    val lastKnownRx = bleManager.lastRxHex
+                    if (lastKnownRx != null) {
+                        val truncatedHex = if (lastKnownRx.length > 36) lastKnownRx.take(33) + "…" else lastKnownRx
+                        "No notify from ring within 20s. Last RX: $truncatedHex. See Admin → Logs for TX/RX hex."
+                    } else {
+                        "No notify from ring within 20s. See Admin → Logs for TX/RX hex."
+                    }
+                }
+                AppLog.w(tagBle, "Manual SpO₂ measurement TIMEOUT (20s): $errorReason")
+                AppLog.lastMeasureResult = "SpO₂: Error - $errorReason"
                 _manualMeasurementState.value = ManualMeasurementState.Error(
                     metric = "SpO₂",
-                    message = "No response from ring (check logcat GalaxyRingBLE for TX/RX hex)"
+                    message = errorReason
                 )
             }
         }
@@ -468,6 +563,7 @@ class BleRepository(
 
         scope.launch {
             currentGatt?.let { gatt ->
+                AppLog.i(tagBle, "Sending Find My Ring command (03 05)")
                 bleManager.sendCommandFrameWithRetry(gatt, byteArrayOf(0x03, 0x05))
             }
         }
@@ -476,11 +572,11 @@ class BleRepository(
 
     suspend fun requestSync(): RingHealthSnapshot {
         val gatt = currentGatt ?: run {
-            Log.w(tagSync, "No active GATT connection; returning current snapshot unchanged")
+            AppLog.w(tagSync, "No active GATT connection; returning current snapshot unchanged")
             return _snapshot.value
         }
 
-        Log.i(tagSync, "Requesting real telemetry sync from SR16 ring...")
+        AppLog.i(tagSync, "Requesting real telemetry sync from SR16 ring...")
 
         // Steps today (05 1A)
         bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_STEPS_TODAY, timeoutMs = 2000L)
@@ -519,11 +615,11 @@ class BleRepository(
 
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
-            Log.i(tagBle, "Ring disconnected unexpectedly. Scheduling auto-reconnect backoff...")
+            AppLog.i(tagBle, "Ring disconnected unexpectedly. Scheduling auto-reconnect backoff...")
             var delayMs = 3000L
             while (isActive && !isUserDisconnect && _connectionState.value is ConnectionState.Disconnected) {
                 delay(delayMs)
-                Log.d(tagBle, "Attempting auto-reconnect to $lastAddr...")
+                AppLog.d(tagBle, "Attempting auto-reconnect to $lastAddr...")
                 connect(lastAddr, lastName)
                 delayMs = (delayMs * 1.8).toLong().coerceAtMost(30000L)
             }
@@ -540,12 +636,21 @@ class BleRepository(
                 isConnected = (newState == BluetoothProfile.STATE_CONNECTED)
             )
 
-            Log.d(tagBle, "onConnectionStateChange: status=$status, newState=$newState for ${device.address}")
+            val stateString = when (newState) {
+                BluetoothProfile.STATE_CONNECTED -> "CONNECTED"
+                BluetoothProfile.STATE_DISCONNECTED -> "DISCONNECTED"
+                BluetoothProfile.STATE_CONNECTING -> "CONNECTING"
+                BluetoothProfile.STATE_DISCONNECTING -> "DISCONNECTING"
+                else -> "STATE_$newState"
+            }
+            AppLog.i(tagBle, "onConnectionStateChange: status=$status, newState=$stateString for ${device.address}")
 
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 _connectionState.value = ConnectionState.Connecting(ringDevice.name)
+                AppLog.i(tagBle, "Connected to GATT server; discovering services...")
                 gatt.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                AppLog.w(tagBle, "Disconnected from GATT server")
                 _connectionState.value = ConnectionState.Disconnected
                 stopSimulation()
                 scheduleAutoReconnect()
@@ -554,9 +659,11 @@ class BleRepository(
 
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            Log.d(tagBle, "onServicesDiscovered: status=$status")
+            AppLog.i(tagBle, "onServicesDiscovered: status=$status (${gatt.services.size} services)")
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                _connectionState.value = ConnectionState.Error("Service discovery failed ($status)")
+                val err = "Service discovery failed ($status)"
+                AppLog.e(tagBle, err)
+                _connectionState.value = ConnectionState.Error(err)
                 return
             }
 
@@ -565,16 +672,20 @@ class BleRepository(
             // Setup notification observer on characteristic 0xB003 via GalaxyRingBLEManager
             val observerConfigured = bleManager.setupNotificationObserver(gatt)
             if (!observerConfigured) {
-                Log.w(tagBle, "0xB003 notification observer configuration deferred; starting init flow")
+                AppLog.w(tagBle, "0xB003 notification observer configuration deferred; starting init flow")
                 startPostConnectionFlow(gatt, device)
             }
         }
 
         override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
-            Log.d(tagBle, "onDescriptorWrite: ${descriptor.uuid}, status=$status")
+            AppLog.i(tagBle, "onDescriptorWrite: ${descriptor.uuid}, status=$status")
             if (status == BluetoothGatt.GATT_SUCCESS) {
+                bleManager.markNotificationEnabled(true)
                 val device = RingDevice(gatt.device.name ?: "Galaxy Ring", gatt.device.address, isConnected = true)
                 startPostConnectionFlow(gatt, device)
+            } else {
+                bleManager.markNotificationEnabled(false)
+                AppLog.e(tagBle, "CCCD descriptor write failed with status $status")
             }
         }
 

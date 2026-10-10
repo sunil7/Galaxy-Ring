@@ -2,12 +2,8 @@ package com.galaxy.ring.data
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.util.Log
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import com.galaxy.ring.debug.AppLog
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -26,12 +22,6 @@ class RingHealthRepository(private val context: Context) {
         context.getSharedPreferences("galaxy_ring_prefs", Context.MODE_PRIVATE)
 
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-
-    init {
-        CoroutineScope(Dispatchers.IO).launch {
-            seedSampleHistoryIfEmpty()
-        }
-    }
 
     // Sleep target (in hours, e.g. 8.0f)
     var sleepTargetHours: Float
@@ -83,7 +73,7 @@ class RingHealthRepository(private val context: Context) {
             recordingMethod = if (isManual) "MANUAL" else "AUTOMATIC"
         )
         hrDao.insert(entity)
-        Log.d(tag, "Saved HR sample to Room: $bpm bpm (manual=$isManual)")
+        AppLog.d(tag, "Saved HR sample to Room: $bpm bpm (manual=$isManual)")
     }
 
     suspend fun saveOxygenSaturation(percentage: Float, timestamp: Long = System.currentTimeMillis(), isManual: Boolean = false) {
@@ -93,7 +83,7 @@ class RingHealthRepository(private val context: Context) {
             recordingMethod = if (isManual) "MANUAL" else "AUTOMATIC"
         )
         spo2Dao.insert(entity)
-        Log.d(tag, "Saved SpO2 sample to Room: $percentage% (manual=$isManual)")
+        AppLog.d(tag, "Saved SpO2 sample to Room: $percentage% (manual=$isManual)")
     }
 
     suspend fun saveDailySteps(steps: Long, calories: Int, distanceMeters: Double, timestamp: Long = System.currentTimeMillis()) {
@@ -106,7 +96,7 @@ class RingHealthRepository(private val context: Context) {
             distanceMeters = distanceMeters
         )
         stepsDao.insertOrUpdate(entity)
-        Log.d(tag, "Saved Daily Steps to Room: $steps on $dateStr")
+        AppLog.d(tag, "Saved Daily Steps to Room: $steps on $dateStr")
     }
 
     suspend fun saveSleepSession(session: SleepSession): Long {
@@ -126,7 +116,7 @@ class RingHealthRepository(private val context: Context) {
             stagesJson = "" // serialized if needed
         )
         val id = sleepDao.insert(entity)
-        Log.d(tag, "Saved Sleep Session to Room: $dateStr, score=${analysis.sleepScore}")
+        AppLog.d(tag, "Saved Sleep Session to Room: $dateStr, score=${analysis.sleepScore}")
         return id
     }
 
@@ -215,102 +205,18 @@ class RingHealthRepository(private val context: Context) {
             stagesJson = ""
         )
         val id = sleepDao.insert(entity)
-        Log.d(tag, "Saved manual sleep override for date=$dateStr ($durationMinutes mins, score=${analysis.sleepScore})")
+        AppLog.d(tag, "Saved manual sleep override for date=$dateStr ($durationMinutes mins, score=${analysis.sleepScore})")
         return id
     }
 
     /**
-     * Seeds past 7 days of realistic biometric data if Room database is empty on first run.
+     * Clears all local biometric history records from Room DB.
      */
-    private suspend fun seedSampleHistoryIfEmpty() {
-        try {
-            val existingSteps = stepsDao.getAllDailySteps().first()
-            if (existingSteps.isNotEmpty()) return
-
-            val now = System.currentTimeMillis()
-            val cal = Calendar.getInstance()
-
-            for (i in 6 downTo 0) {
-                cal.timeInMillis = now - (i * 86400000L)
-                val dateStr = dateFormat.format(cal.time)
-                val dayStart = cal.apply {
-                    set(Calendar.HOUR_OF_DAY, 0)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                }.timeInMillis
-
-                // Seed Steps
-                val stepCount = (6000L..11500L).random()
-                stepsDao.insertOrUpdate(
-                    DailyStepsEntity(
-                        date = dateStr,
-                        timestamp = dayStart + 20 * 3600000L,
-                        steps = stepCount,
-                        caloriesKcal = (stepCount * 0.04).toInt(),
-                        distanceMeters = stepCount * 0.76
-                    )
-                )
-
-                // Seed HR Samples for the day
-                val hrSamples = mutableListOf<HeartRateEntity>()
-                for (hour in 7..22 step 2) {
-                    val bpm = (62..86).random()
-                    hrSamples.add(
-                        HeartRateEntity(
-                            timestamp = dayStart + hour * 3600000L + (10..50).random() * 60000L,
-                            bpm = bpm,
-                            recordingMethod = "AUTOMATIC"
-                        )
-                    )
-                }
-                hrDao.insertAll(hrSamples)
-
-                // Seed SpO2 Samples
-                val spo2Samples = mutableListOf<OxygenSaturationEntity>()
-                for (hour in listOf(8, 14, 20)) {
-                    val spo2 = (96..99).random().toFloat()
-                    spo2Samples.add(
-                        OxygenSaturationEntity(
-                            timestamp = dayStart + hour * 3600000L,
-                            percentage = spo2,
-                            recordingMethod = "AUTOMATIC"
-                        )
-                    )
-                }
-                spo2Dao.insertAll(spo2Samples)
-
-                // Seed Sleep for previous night
-                val sleepEnd = dayStart + 7 * 3600000L + (10..30).random() * 60000L
-                val durationMins = (420L..495L).random() // 7h - 8.2h
-                val sleepStart = sleepEnd - durationMins * 60000L
-
-                val deepMins = (durationMins * (18..24).random() / 100.0).toLong()
-                val remMins = (durationMins * (20..26).random() / 100.0).toLong()
-                val awakeMins = (durationMins * (4..7).random() / 100.0).toLong()
-                val lightMins = durationMins - deepMins - remMins - awakeMins
-
-                val efficiency = (durationMins - awakeMins).toFloat() / durationMins.toFloat()
-                val score = (78..94).random()
-
-                sleepDao.insert(
-                    SleepSessionEntity(
-                        date = dateStr,
-                        startTime = sleepStart,
-                        endTime = sleepEnd,
-                        durationMinutes = durationMins,
-                        deepMinutes = deepMins,
-                        lightMinutes = lightMins,
-                        remMinutes = remMins,
-                        awakeMinutes = awakeMins,
-                        sleepScore = score,
-                        sleepEfficiency = efficiency,
-                        stagesJson = ""
-                    )
-                )
-            }
-            Log.d(tag, "Successfully seeded initial biometric history into Room DB")
-        } catch (e: Exception) {
-            Log.w(tag, "Notice seeding initial history: ${e.message}")
-        }
+    suspend fun clearAllHistory() {
+        hrDao.deleteAll()
+        spo2Dao.deleteAll()
+        stepsDao.deleteAll()
+        sleepDao.deleteAll()
+        AppLog.i(tag, "Cleared all local biometric history from Room DB")
     }
 }

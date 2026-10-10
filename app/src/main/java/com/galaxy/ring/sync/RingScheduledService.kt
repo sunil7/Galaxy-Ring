@@ -13,12 +13,12 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
-import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.galaxy.ring.GalaxyRingApp
 import com.galaxy.ring.MainActivity
 import com.galaxy.ring.data.ConnectionState
+import com.galaxy.ring.debug.AppLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,7 +35,7 @@ class RingScheduledService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.i(tag, "RingScheduledService created")
+        AppLog.i(tag, "RingScheduledService created")
         createNotificationChannel()
 
         val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
@@ -43,7 +43,7 @@ class RingScheduledService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.i(tag, "RingScheduledService starting foreground monitoring...")
+        AppLog.i(tag, "RingScheduledService starting foreground monitoring...")
 
         try {
             val notification = buildPersistentNotification()
@@ -57,7 +57,7 @@ class RingScheduledService : Service() {
                 startForeground(NOTIFICATION_ID, notification)
             }
         } catch (e: Exception) {
-            Log.e(tag, "Failed to startForeground for RingScheduledService: ${e.message}", e)
+            AppLog.e(tag, "Failed to startForeground for RingScheduledService: ${e.message}", e)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -73,7 +73,7 @@ class RingScheduledService : Service() {
             val repo = app.healthRepository
             val bleRepo = app.bleRepository
 
-            Log.i(tag, "Started scheduled monitoring loop. Interval: ${repo.scheduleIntervalMinutes}m")
+            AppLog.i(tag, "Started scheduled monitoring loop. Interval: ${repo.scheduleIntervalMinutes}m")
 
             while (isActive && repo.isScheduleEnabled) {
                 val intervalMillis = repo.scheduleIntervalMinutes * 60 * 1000L
@@ -81,7 +81,7 @@ class RingScheduledService : Service() {
 
                 if (!repo.isScheduleEnabled) break
 
-                Log.d(tag, "Scheduled check waking up. Executing biometric sampling...")
+                AppLog.d(tag, "Scheduled check waking up. Executing biometric sampling...")
                 try {
                     wakeLock?.acquire(15000L) // Safe 15-second partial wakelock
 
@@ -90,7 +90,7 @@ class RingScheduledService : Service() {
                     if (connState !is ConnectionState.Ready && connState !is ConnectionState.Connected) {
                         val lastAddr = repo.lastConnectedAddress
                         if (lastAddr != null) {
-                            Log.d(tag, "Ring disconnected during scheduled check; connecting to $lastAddr")
+                            AppLog.d(tag, "Ring disconnected during scheduled check; connecting to $lastAddr")
                             bleRepo.connect(lastAddr, repo.lastConnectedName ?: "Galaxy Ring")
                             delay(3000)
                         }
@@ -98,23 +98,23 @@ class RingScheduledService : Service() {
 
                     // 1. Measure Heart Rate if enabled
                     if (repo.scheduleCheckHeartRate) {
-                        Log.d(tag, "Running scheduled Heart Rate check...")
+                        AppLog.d(tag, "Running scheduled Heart Rate check...")
                         bleRepo.measureHeartRate()
                         delay(2500)
                     }
 
                     // 2. Measure SpO2 if enabled
                     if (repo.scheduleCheckSpo2) {
-                        Log.d(tag, "Running scheduled SpO2 check...")
+                        AppLog.d(tag, "Running scheduled SpO2 check...")
                         bleRepo.measureOxygenSaturation()
                         delay(2500)
                     }
 
                     // 3. Sync Daily Steps
                     bleRepo.requestSync()
-                    Log.i(tag, "Scheduled biometric sampling completed successfully")
+                    AppLog.i(tag, "Scheduled biometric sampling completed successfully")
                 } catch (e: Exception) {
-                    Log.e(tag, "Error during scheduled biometric check", e)
+                    AppLog.e(tag, "Error during scheduled biometric check: ${e.message}", e)
                 } finally {
                     try {
                         if (wakeLock?.isHeld == true) {
@@ -170,7 +170,7 @@ class RingScheduledService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        Log.i(tag, "RingScheduledService destroyed")
+        AppLog.i(tag, "RingScheduledService destroyed")
         scheduledLoopJob?.cancel()
         try {
             if (wakeLock?.isHeld == true) {
@@ -198,7 +198,7 @@ class RingScheduledService : Service() {
                     Manifest.permission.BLUETOOTH_SCAN
                 ) == PackageManager.PERMISSION_GRANTED
                 if (!hasBtConnect && !hasBtScan) {
-                    Log.w("GalaxyRingSync", "Cannot start RingScheduledService: Bluetooth permissions not granted")
+                    AppLog.w("GalaxyRingSync", "Cannot start RingScheduledService: Bluetooth permissions not granted")
                     return
                 }
             }
@@ -210,7 +210,7 @@ class RingScheduledService : Service() {
                     context.startService(intent)
                 }
             } catch (e: Exception) {
-                Log.e("GalaxyRingSync", "Failed to start RingScheduledService", e)
+                AppLog.e("GalaxyRingSync", "Failed to start RingScheduledService: ${e.message}", e)
             }
         }
 
@@ -219,7 +219,7 @@ class RingScheduledService : Service() {
             try {
                 context.stopService(intent)
             } catch (e: Exception) {
-                Log.e("GalaxyRingSync", "Failed to stop RingScheduledService", e)
+                AppLog.e("GalaxyRingSync", "Failed to stop RingScheduledService: ${e.message}", e)
             }
         }
 

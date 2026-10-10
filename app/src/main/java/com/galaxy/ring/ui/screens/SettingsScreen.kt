@@ -62,17 +62,22 @@ import com.galaxy.ring.GalaxyRingApp
 import com.galaxy.ring.sync.RingScheduledService
 import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
+import android.widget.Toast
+import androidx.compose.material.icons.filled.BugReport
 import com.galaxy.ring.ui.theme.NeonEmerald
 import com.galaxy.ring.ui.theme.RosePulse
 
 @Composable
 fun SettingsScreen(
     onOpenHealthRationale: () -> Unit,
-    hasHealthPermissions: Boolean
+    hasHealthPermissions: Boolean,
+    onOpenAdmin: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val app = GalaxyRingApp.instance
     val repo = app.healthRepository
+    var adminTapCount by remember { mutableIntStateOf(0) }
+    var isAdminUnlocked by remember { mutableStateOf(true) }
 
     var isScheduleEnabled by remember { mutableStateOf(repo.isScheduleEnabled) }
     var selectedInterval by remember { mutableIntStateOf(repo.scheduleIntervalMinutes) }
@@ -545,6 +550,99 @@ fun SettingsScreen(
                             color = CyberCyan
                         )
                     }
+                }
+            }
+        }
+
+        // 4. Admin & Debug Diagnostic Section
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(CyberCyan.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.BugReport,
+                                contentDescription = null,
+                                tint = CyberCyan,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Admin & Diagnostics",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Live BLE packet inspection and error export",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Inspect real-time Bluetooth LE packets (TX/RX), verify GATT services (0xA00A / 0xB002 / 0xB003), inspect measurement failure details, and export logs for debugging.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Button(
+                        onClick = onOpenAdmin,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("admin_debug_button"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.BugReport,
+                            contentDescription = null,
+                            tint = Color(0xFF0F172A),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Admin / Debug",
+                            color = Color(0xFF0F172A),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = "Galaxy Ring Companion v1.0 (Build 1) • Tap 7 times to unlock",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .clickable {
+                                adminTapCount++
+                                if (adminTapCount >= 7) {
+                                    Toast.makeText(context, "Admin / Debug mode unlocked!", Toast.LENGTH_SHORT).show()
+                                    adminTapCount = 0
+                                } else {
+                                    Toast.makeText(context, "${7 - adminTapCount} taps to unlock Admin", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                    )
                 }
             }
         }
