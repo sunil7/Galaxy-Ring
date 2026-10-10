@@ -132,10 +132,9 @@ fun SleepScreen() {
 
     val selectedNightEntity by repo.getSleepForDate(selectedDateStr).collectAsState(initial = null)
 
-    // Build session
-    val sessionToAnalyze = remember(selectedNightEntity, selectedCalendar) {
-        if (selectedNightEntity != null) {
-            val ent = selectedNightEntity!!
+    // Build session from real Room records only
+    val sessionToAnalyze = remember(selectedNightEntity) {
+        selectedNightEntity?.let { ent ->
             val start = ent.startTime
             val end = ent.endTime
 
@@ -153,32 +152,19 @@ fun SleepScreen() {
                 qualityScore = ent.sleepScore,
                 stages = stages
             )
-        } else {
-            // Default synthesized night for the day if no Room record yet
-            val now = selectedCalendar.timeInMillis
-            val sleepEnd = now
-            val sleepStart = sleepEnd - (7 * 3600000L + 20 * 60000L)
-            SleepSession(
-                startTime = sleepStart,
-                endTime = sleepEnd,
-                qualityScore = 82,
-                stages = listOf(
-                    SleepStageRecord(SleepStage.LIGHT, sleepStart, sleepStart + 45 * 60000L),
-                    SleepStageRecord(SleepStage.DEEP, sleepStart + 45 * 60000L, sleepStart + 150 * 60000L),
-                    SleepStageRecord(SleepStage.REM, sleepStart + 150 * 60000L, sleepStart + 240 * 60000L),
-                    SleepStageRecord(SleepStage.LIGHT, sleepStart + 240 * 60000L, sleepStart + 400 * 60000L),
-                    SleepStageRecord(SleepStage.AWAKE, sleepStart + 400 * 60000L, sleepEnd)
-                )
-            )
         }
     }
 
     // Query real overnight HR and SpO2 between sleep start and end
-    val overnightHr by remember(sessionToAnalyze.startTime, sessionToAnalyze.endTime) {
-        repo.getHeartRateBetween(sessionToAnalyze.startTime, sessionToAnalyze.endTime)
+    val overnightHr by remember(sessionToAnalyze) {
+        val s = sessionToAnalyze
+        if (s != null) repo.getHeartRateBetween(s.startTime, s.endTime)
+        else kotlinx.coroutines.flow.flowOf(emptyList())
     }.collectAsState(initial = emptyList())
-    val overnightSpo2 by remember(sessionToAnalyze.startTime, sessionToAnalyze.endTime) {
-        repo.getSpo2Between(sessionToAnalyze.startTime, sessionToAnalyze.endTime)
+    val overnightSpo2 by remember(sessionToAnalyze) {
+        val s = sessionToAnalyze
+        if (s != null) repo.getSpo2Between(s.startTime, s.endTime)
+        else kotlinx.coroutines.flow.flowOf(emptyList())
     }.collectAsState(initial = emptyList())
 
     // Previous night for comparison
@@ -197,16 +183,18 @@ fun SleepScreen() {
         }
     }
 
-    // Feature 3: Extended sleep analysis with consistency, sleep debt, tips, overnight vitals
+    // Extended sleep analysis with consistency, sleep debt, tips, overnight vitals
     val analysis = remember(sessionToAnalyze, targetHours, prevSession, past7Sessions, overnightHr, overnightSpo2) {
-        SleepAnalyzer.analyze(
-            session = sessionToAnalyze,
-            targetDurationMinutes = (targetHours * 60).toLong(),
-            previousNight = prevSession,
-            last7Nights = past7Sessions,
-            overnightHeartRate = overnightHr,
-            overnightSpo2 = overnightSpo2
-        )
+        sessionToAnalyze?.let { s ->
+            SleepAnalyzer.analyze(
+                session = s,
+                targetDurationMinutes = (targetHours * 60).toLong(),
+                previousNight = prevSession,
+                last7Nights = past7Sessions,
+                overnightHeartRate = overnightHr,
+                overnightSpo2 = overnightSpo2
+            )
+        }
     }
 
     // Feature 4: Apnea risk screening
@@ -216,15 +204,17 @@ fun SleepScreen() {
         observedBreathingPauses = repo.apneaObservedPauses
     )
     val apneaReport = remember(overnightSpo2, overnightHr, analysis, apneaSymptoms) {
-        SleepApneaScreener.evaluate(
-            overnightSpo2 = overnightSpo2,
-            overnightHr = overnightHr,
-            sleepAnalysis = analysis,
-            symptoms = apneaSymptoms
-        )
+        if (analysis != null) {
+            SleepApneaScreener.evaluate(
+                overnightSpo2 = overnightSpo2,
+                overnightHr = overnightHr,
+                sleepAnalysis = analysis,
+                symptoms = apneaSymptoms
+            )
+        } else null
     }
 
-    Log.d(TAG, "SleepScreen range=$selectedRange, session=${sessionToAnalyze.durationMinutes}m, score=${analysis.sleepScore}, apneaBand=${apneaReport.riskBand}")
+    Log.d(TAG, "SleepScreen range=$selectedRange, session=${sessionToAnalyze?.durationMinutes}m, score=${analysis?.sleepScore}, apneaBand=${apneaReport?.riskBand}")
 
     LazyColumn(
         modifier = Modifier
@@ -295,60 +285,120 @@ fun SleepScreen() {
                     )
                 }
 
-                // Sleep Score Hero Card
-                item {
-                    SleepScoreCard(analysis = analysis)
-                }
-
-                // Feature 2: Hypnogram-Style Stage Timeline
-                item {
-                    HypnogramTimelineCard(session = sessionToAnalyze, analysis = analysis)
-                }
-
-                // Stage Bar & Target Breakdown
-                item {
-                    SleepStagesCard(session = sessionToAnalyze, analysis = analysis)
-                }
-
-                // Feature 3: Richer Sleep Metrics Grid (Sleep Consistency, Sleep Debt, Awakenings, Target Delta)
-                item {
-                    RicherSleepMetricsGrid(analysis = analysis)
-                }
-
-                // Feature 3: Stage Quality Tips
-                item {
-                    StageQualityTipsCard(tips = analysis.stageQualityTips)
-                }
-
-                // Feature 3: Overnight HR & SpO2 Vitals Card
-                item {
-                    OvernightVitalsCard(
-                        analysis = analysis,
-                        hrSamplesCount = overnightHr.size,
-                        spo2SamplesCount = overnightSpo2.size
-                    )
-                }
-
-                // Feature 4: Overnight Breathing Indicators (Apnea Risk Screening)
-                item {
-                    OvernightBreathingIndicatorsCard(
-                        report = apneaReport,
-                        symptoms = apneaSymptoms,
-                        onToggleSnoring = {
-                            repo.apneaLoudSnoring = it
-                        },
-                        onToggleSleepiness = {
-                            repo.apneaDaytimeSleepiness = it
-                        },
-                        onTogglePauses = {
-                            repo.apneaObservedPauses = it
+                if (sessionToAnalyze == null || analysis == null) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(22.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Nightlight,
+                                    contentDescription = null,
+                                    tint = ElectricViolet,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = "No sleep data for this day",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Wear your Galaxy Ring overnight to track sleep stages, efficiency, score, and hypnogram.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Button(
+                                        onClick = { showManualOverrideDialog = true },
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = ElectricViolet)
+                                    ) {
+                                        Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Log Sleep Manually")
+                                    }
+                                    OutlinedButton(
+                                        onClick = { showTargetDialog = true },
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text("Set Sleep Goal (${targetHours.toInt()}h)")
+                                    }
+                                }
+                            }
                         }
-                    )
-                }
+                    }
+                } else {
+                    // Sleep Score Hero Card
+                    item {
+                        SleepScoreCard(analysis = analysis)
+                    }
 
-                // Comparative Insights (Previous Night & 7-Day Average)
-                item {
-                    SleepComparisonCard(analysis = analysis)
+                    // Feature 2: Hypnogram-Style Stage Timeline
+                    item {
+                        HypnogramTimelineCard(session = sessionToAnalyze, analysis = analysis)
+                    }
+
+                    // Stage Bar & Target Breakdown
+                    item {
+                        SleepStagesCard(session = sessionToAnalyze, analysis = analysis)
+                    }
+
+                    // Feature 3: Richer Sleep Metrics Grid (Sleep Consistency, Sleep Debt, Awakenings, Target Delta)
+                    item {
+                        RicherSleepMetricsGrid(analysis = analysis)
+                    }
+
+                    // Feature 3: Stage Quality Tips
+                    item {
+                        StageQualityTipsCard(tips = analysis.stageQualityTips)
+                    }
+
+                    // Feature 3: Overnight HR & SpO2 Vitals Card
+                    item {
+                        OvernightVitalsCard(
+                            analysis = analysis,
+                            hrSamplesCount = overnightHr.size,
+                            spo2SamplesCount = overnightSpo2.size
+                        )
+                    }
+
+                    // Feature 4: Overnight Breathing Indicators (Apnea Risk Screening)
+                    if (apneaReport != null) {
+                        item {
+                            OvernightBreathingIndicatorsCard(
+                                report = apneaReport,
+                                symptoms = apneaSymptoms,
+                                onToggleSnoring = {
+                                    repo.apneaLoudSnoring = it
+                                },
+                                onToggleSleepiness = {
+                                    repo.apneaDaytimeSleepiness = it
+                                },
+                                onTogglePauses = {
+                                    repo.apneaObservedPauses = it
+                                }
+                            )
+                        }
+                    }
+
+                    // Comparative Insights (Previous Night & 7-Day Average)
+                    item {
+                        SleepComparisonCard(analysis = analysis)
+                    }
                 }
             }
 
@@ -414,8 +464,8 @@ fun SleepScreen() {
     if (showManualOverrideDialog) {
         ManualSleepOverrideDialog(
             dateStr = selectedDateStr,
-            initialStartTime = sessionToAnalyze.startTime,
-            initialEndTime = sessionToAnalyze.endTime,
+            initialStartTime = sessionToAnalyze?.startTime ?: (selectedCalendar.timeInMillis - 8 * 3600000L),
+            initialEndTime = sessionToAnalyze?.endTime ?: selectedCalendar.timeInMillis,
             onDismiss = { showManualOverrideDialog = false },
             onSave = { start, end ->
                 scope.launch {
@@ -1143,199 +1193,217 @@ fun WeekSleepOverviewCard(
             Spacer(modifier = Modifier.height(14.dp))
 
             // Averages row
-            val avgScore = if (recentSessions.isNotEmpty()) recentSessions.map { it.sleepScore }.average().toInt() else 83
-            val avgDurationMins = if (recentSessions.isNotEmpty()) recentSessions.map { it.durationMinutes }.average().toLong() else 450L
-            val avgEff = if (recentSessions.isNotEmpty()) (recentSessions.map { it.sleepEfficiency }.average() * 100).toInt() else 88
+            val hasWeekData = recentSessions.isNotEmpty()
+            val avgScore = if (hasWeekData) recentSessions.map { it.sleepScore }.average().toInt() else 0
+            val avgDurationMins = if (hasWeekData) recentSessions.map { it.durationMinutes }.average().toLong() else 0L
+            val avgEff = if (hasWeekData) (recentSessions.map { it.sleepEfficiency }.average() * 100).toInt() else 0
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceAround
             ) {
-                MetricPill(label = "Avg Score", value = "$avgScore", unit = "/100", color = CyberCyan)
-                MetricPill(label = "Avg Sleep", value = "${avgDurationMins / 60}h ${avgDurationMins % 60}m", unit = "", color = ElectricViolet)
-                MetricPill(label = "Avg Efficiency", value = "$avgEff", unit = "%", color = NeonEmerald)
+                MetricPill(label = "Avg Score", value = if (hasWeekData) "$avgScore" else "--", unit = if (hasWeekData) "/100" else "", color = CyberCyan)
+                MetricPill(label = "Avg Sleep", value = if (hasWeekData) "${avgDurationMins / 60}h ${avgDurationMins % 60}m" else "--", unit = "", color = ElectricViolet)
+                MetricPill(label = "Avg Efficiency", value = if (hasWeekData) "$avgEff" else "--", unit = if (hasWeekData) "%" else "", color = NeonEmerald)
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 1. Bar Chart: Sleep Score per night (last 7 nights)
-            Text(
-                text = "Sleep Score (Last 7 Nights)",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            val sessions7 = remember(recentSessions) {
-                if (recentSessions.size >= 7) recentSessions.take(7).reversed()
-                else (1..7).map { i ->
-                    SleepSessionEntity(
-                        date = "Day $i",
-                        startTime = 0L,
-                        endTime = 0L,
-                        durationMinutes = (420..490).random().toLong(),
-                        deepMinutes = 95L,
-                        lightMinutes = 220L,
-                        remMinutes = 110L,
-                        awakeMinutes = 25L,
-                        sleepScore = (76..92).random(),
-                        sleepEfficiency = 0.89f,
-                        stagesJson = ""
-                    )
+            if (!hasWeekData) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.Nightlight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "No sleep records for the past 7 days",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Wear your Galaxy Ring overnight or log sleep in the Day tab to build week trends.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
-            }
+            } else {
+                val sessions7 = recentSessions.take(7).reversed()
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(130.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF0F172A))
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-            ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val w = size.width
-                    val h = size.height
-                    val barCount = sessions7.size
-                    val barWidth = (w / barCount) * 0.55f
-                    val stepX = w / barCount
+                // 1. Bar Chart: Sleep Score per night (last 7 nights)
+                Text(
+                    text = "Sleep Score (Last 7 Nights)",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(8.dp))
 
-                    sessions7.forEachIndexed { i, s ->
-                        val normScore = (s.sleepScore / 100f).coerceIn(0f, 1f)
-                        val barH = normScore * (h - 20.dp.toPx())
-                        val x = i * stepX + (stepX - barWidth) / 2f
-                        val y = h - barH - 4.dp.toPx()
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(130.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF0F172A))
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val w = size.width
+                        val h = size.height
+                        val barCount = sessions7.size.coerceAtLeast(1)
+                        val barWidth = (w / barCount) * 0.55f
+                        val stepX = w / barCount
 
-                        val barColor = when {
-                            s.sleepScore >= 85 -> NeonEmerald
-                            s.sleepScore >= 75 -> CyberCyan
-                            s.sleepScore >= 65 -> Color(0xFFF59E0B)
-                            else -> RosePulse
+                        sessions7.forEachIndexed { i, s ->
+                            val normScore = (s.sleepScore / 100f).coerceIn(0f, 1f)
+                            val barH = normScore * (h - 20.dp.toPx())
+                            val x = i * stepX + (stepX - barWidth) / 2f
+                            val y = h - barH - 4.dp.toPx()
+
+                            val barColor = when {
+                                s.sleepScore >= 85 -> NeonEmerald
+                                s.sleepScore >= 75 -> CyberCyan
+                                s.sleepScore >= 65 -> Color(0xFFF59E0B)
+                                else -> RosePulse
+                            }
+
+                            drawRoundRect(
+                                color = barColor,
+                                topLeft = Offset(x, y),
+                                size = androidx.compose.ui.geometry.Size(barWidth, barH),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                            )
                         }
+                    }
 
-                        drawRoundRect(
-                            color = barColor,
-                            topLeft = Offset(x, y),
-                            size = androidx.compose.ui.geometry.Size(barWidth, barH),
-                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())
-                        )
+                    // Days Labels along bottom
+                    Row(
+                        modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter),
+                        horizontalArrangement = Arrangement.SpaceAround
+                    ) {
+                        sessions7.forEach { s ->
+                            val shortDate = s.date.takeLast(5)
+                            Text(
+                                text = shortDate,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.6f),
+                                fontSize = 10.sp
+                            )
+                        }
                     }
                 }
 
-                // Days Labels along bottom
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // 2. Stacked Stage Bars: Deep / Light / REM / Awake minutes per night
+                Text(
+                    text = "Sleep Stages (Deep / Light / REM / Awake)",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(130.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF0F172A))
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val w = size.width
+                        val h = size.height
+                        val barCount = sessions7.size.coerceAtLeast(1)
+                        val barWidth = (w / barCount) * 0.55f
+                        val stepX = w / barCount
+                        val maxMins = 600f // 10 hours scale
+
+                        sessions7.forEachIndexed { i, s ->
+                            val x = i * stepX + (stepX - barWidth) / 2f
+                            var currentBottom = h - 16.dp.toPx()
+
+                            // 1. Deep (Cyan)
+                            val deepH = (s.deepMinutes.toFloat() / maxMins) * (h - 20.dp.toPx())
+                            drawRect(
+                                color = Color(0xFF38BDF8),
+                                topLeft = Offset(x, currentBottom - deepH),
+                                size = androidx.compose.ui.geometry.Size(barWidth, deepH)
+                            )
+                            currentBottom -= deepH
+
+                            // 2. Light (Slate)
+                            val lightH = (s.lightMinutes.toFloat() / maxMins) * (h - 20.dp.toPx())
+                            drawRect(
+                                color = Color(0xFF64748B),
+                                topLeft = Offset(x, currentBottom - lightH),
+                                size = androidx.compose.ui.geometry.Size(barWidth, lightH)
+                            )
+                            currentBottom -= lightH
+
+                            // 3. REM (Violet)
+                            val remH = (s.remMinutes.toFloat() / maxMins) * (h - 20.dp.toPx())
+                            drawRect(
+                                color = Color(0xFFA855F7),
+                                topLeft = Offset(x, currentBottom - remH),
+                                size = androidx.compose.ui.geometry.Size(barWidth, remH)
+                            )
+                            currentBottom -= remH
+
+                            // 4. Awake (Amber)
+                            val awakeH = (s.awakeMinutes.toFloat() / maxMins) * (h - 20.dp.toPx())
+                            drawRect(
+                                color = Color(0xFFF59E0B),
+                                topLeft = Offset(x, currentBottom - awakeH),
+                                size = androidx.compose.ui.geometry.Size(barWidth, awakeH)
+                            )
+                        }
+                    }
+
+                    // Days Labels along bottom
+                    Row(
+                        modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter),
+                        horizontalArrangement = Arrangement.SpaceAround
+                    ) {
+                        sessions7.forEach { s ->
+                            val shortDate = s.date.takeLast(5)
+                            Text(
+                                text = shortDate,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.6f),
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Stage Legend
                 Row(
-                    modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter),
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceAround
                 ) {
-                    val daysOfWeek = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-                    sessions7.forEachIndexed { i, _ ->
-                        Text(
-                            text = daysOfWeek.getOrElse(i) { "D$i" },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 10.sp
-                        )
-                    }
+                    ScoreLegendItem(color = Color(0xFF38BDF8), label = "Deep")
+                    ScoreLegendItem(color = Color(0xFF64748B), label = "Light")
+                    ScoreLegendItem(color = Color(0xFFA855F7), label = "REM")
+                    ScoreLegendItem(color = Color(0xFFF59E0B), label = "Awake")
                 }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // 2. Stacked Stage Bars: Deep / Light / REM / Awake minutes per night
-            Text(
-                text = "Sleep Stages (Deep / Light / REM / Awake)",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(130.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF0F172A))
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-            ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val w = size.width
-                    val h = size.height
-                    val barCount = sessions7.size
-                    val barWidth = (w / barCount) * 0.55f
-                    val stepX = w / barCount
-                    val maxMins = 600f // 10 hours scale
-
-                    sessions7.forEachIndexed { i, s ->
-                        val x = i * stepX + (stepX - barWidth) / 2f
-                        var currentBottom = h - 16.dp.toPx()
-
-                        // 1. Deep (Cyan)
-                        val deepH = (s.deepMinutes.toFloat() / maxMins) * (h - 20.dp.toPx())
-                        drawRect(
-                            color = Color(0xFF38BDF8),
-                            topLeft = Offset(x, currentBottom - deepH),
-                            size = androidx.compose.ui.geometry.Size(barWidth, deepH)
-                        )
-                        currentBottom -= deepH
-
-                        // 2. Light (Slate)
-                        val lightH = (s.lightMinutes.toFloat() / maxMins) * (h - 20.dp.toPx())
-                        drawRect(
-                            color = Color(0xFF64748B),
-                            topLeft = Offset(x, currentBottom - lightH),
-                            size = androidx.compose.ui.geometry.Size(barWidth, lightH)
-                        )
-                        currentBottom -= lightH
-
-                        // 3. REM (Violet)
-                        val remH = (s.remMinutes.toFloat() / maxMins) * (h - 20.dp.toPx())
-                        drawRect(
-                            color = Color(0xFFA855F7),
-                            topLeft = Offset(x, currentBottom - remH),
-                            size = androidx.compose.ui.geometry.Size(barWidth, remH)
-                        )
-                        currentBottom -= remH
-
-                        // 4. Awake (Amber)
-                        val awakeH = (s.awakeMinutes.toFloat() / maxMins) * (h - 20.dp.toPx())
-                        drawRect(
-                            color = Color(0xFFF59E0B),
-                            topLeft = Offset(x, currentBottom - awakeH),
-                            size = androidx.compose.ui.geometry.Size(barWidth, awakeH)
-                        )
-                    }
-                }
-
-                // Days Labels along bottom
-                Row(
-                    modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter),
-                    horizontalArrangement = Arrangement.SpaceAround
-                ) {
-                    val daysOfWeek = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-                    sessions7.forEachIndexed { i, _ ->
-                        Text(
-                            text = daysOfWeek.getOrElse(i) { "D$i" },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 10.sp
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Stage Legend
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceAround
-            ) {
-                ScoreLegendItem(color = Color(0xFF38BDF8), label = "Deep")
-                ScoreLegendItem(color = Color(0xFF64748B), label = "Light")
-                ScoreLegendItem(color = Color(0xFFA855F7), label = "REM")
-                ScoreLegendItem(color = Color(0xFFF59E0B), label = "Awake")
             }
         }
     }

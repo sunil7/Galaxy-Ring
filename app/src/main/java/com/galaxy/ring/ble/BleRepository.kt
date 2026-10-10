@@ -361,7 +361,7 @@ class BleRepository(
     private fun validateMeasurementPrerequisites(metric: String): String? {
         val gatt = currentGatt
         if (gatt == null) {
-            return "No BLE connection. Connect the ring first."
+            return "No BLE GATT connection."
         }
         val state = _connectionState.value
         if (state !is ConnectionState.Ready) {
@@ -370,17 +370,20 @@ class BleRepository(
                 is ConnectionState.Initializing -> "Initializing"
                 is ConnectionState.Scanning -> "Scanning"
                 is ConnectionState.Syncing -> "Syncing"
-                is ConnectionState.Connected -> "Connected (Handshake pending)"
+                is ConnectionState.Connected -> "Connected"
                 is ConnectionState.Error -> "Error"
                 else -> "Disconnected"
             }
-            return "Not ready (state=$stateLabel). Wait until Ready."
+            return "Not READY (current: $stateLabel). Wait until Ready."
         }
         if (bleManager.writeCharacteristic == null) {
-            return "Write characteristic 0xB002 not found. Wrong device or GATT discovery failed."
+            return "0xB002 write characteristic missing."
         }
-        if (!bleManager.isNotificationEnabled || bleManager.notifyCharacteristic == null) {
-            return "Notifications on 0xB003 not enabled."
+        if (bleManager.notifyCharacteristic == null) {
+            return "0xB003 notify characteristic missing."
+        }
+        if (!bleManager.isNotificationEnabled) {
+            return "0xB003 notifications not enabled. Enable CCCD."
         }
         return null
     }
@@ -668,6 +671,15 @@ class BleRepository(
             }
 
             val device = RingDevice(gatt.device.name ?: "Galaxy Ring", gatt.device.address, isConnected = true)
+
+            // Attempt to read Battery Level if standard Battery Service (0x180F) is present
+            val batteryService = gatt.getService(Protocol.BATTERY_SERVICE_UUID)
+            val batteryChar = batteryService?.getCharacteristic(Protocol.BATTERY_LEVEL_CHAR_UUID)
+            if (batteryChar != null) {
+                AppLog.d(tagBle, "Discovered Battery characteristic 0x2A19, reading initial level...")
+                @Suppress("DEPRECATION")
+                gatt.readCharacteristic(batteryChar)
+            }
 
             // Setup notification observer on characteristic 0xB003 via GalaxyRingBLEManager
             val observerConfigured = bleManager.setupNotificationObserver(gatt)

@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Bloodtype
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothConnected
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Favorite
@@ -709,10 +710,13 @@ fun SleepGoalProgressRingCard(
     val app = GalaxyRingApp.instance
     val targetHours = app.healthRepository.sleepTargetHours
     val sleep = snapshot.latestSleep
+    val hasSleepData = sleep != null && sleep.durationMinutes > 0
 
-    val actualMinutes = sleep?.durationMinutes ?: (6 * 60 + 42L) // 6h 42m
+    val actualMinutes = if (hasSleepData) sleep!!.durationMinutes else 0L
     val targetMinutes = (targetHours * 60).toLong()
-    val progress = (actualMinutes.toFloat() / targetMinutes.toFloat()).coerceIn(0f, 1f)
+    val progress = if (hasSleepData && targetMinutes > 0) {
+        (actualMinutes.toFloat() / targetMinutes.toFloat()).coerceIn(0f, 1f)
+    } else 0f
 
     val actualH = actualMinutes / 60
     val actualM = actualMinutes % 60
@@ -750,20 +754,37 @@ fun SleepGoalProgressRingCard(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                Text(
-                    text = "Last night: ${actualH}h ${actualM}m / ${targetHours.toInt()}h target",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                if (hasSleepData) {
+                    Text(
+                        text = "Last night: ${actualH}h ${actualM}m / ${targetHours.toInt()}h target",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
 
-                Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
 
-                Text(
-                    text = "Quality score: ${sleep?.qualityScore ?: 84}/100 • Restorative sleep",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ElectricViolet
-                )
+                    Text(
+                        text = "Quality score: ${sleep?.qualityScore ?: 0}/100 • Restorative sleep",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ElectricViolet
+                    )
+                } else {
+                    Text(
+                        text = "No sleep data yet",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = "Target: ${targetHours.toInt()}h • Wear ring overnight to track sleep",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             // Circular Progress Ring
@@ -784,25 +805,27 @@ fun SleepGoalProgressRingCard(
                         style = Stroke(width = stroke)
                     )
 
-                    // Arc
-                    drawArc(
-                        brush = Brush.sweepGradient(
-                            listOf(CyberCyan, ElectricViolet, CyberCyan)
-                        ),
-                        startAngle = -90f,
-                        sweepAngle = 360f * progress,
-                        useCenter = false,
-                        topLeft = Offset(center.x - radius, center.y - radius),
-                        size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
-                        style = Stroke(width = stroke, cap = StrokeCap.Round)
-                    )
+                    // Arc (only drawn if there is actual sleep recorded)
+                    if (progress > 0f) {
+                        drawArc(
+                            brush = Brush.sweepGradient(
+                                listOf(CyberCyan, ElectricViolet, CyberCyan)
+                            ),
+                            startAngle = -90f,
+                            sweepAngle = 360f * progress,
+                            useCenter = false,
+                            topLeft = Offset(center.x - radius, center.y - radius),
+                            size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
+                            style = Stroke(width = stroke, cap = StrokeCap.Round)
+                        )
+                    }
                 }
 
                 Text(
-                    text = "${(progress * 100).toInt()}%",
+                    text = if (hasSleepData) "${(progress * 100).toInt()}%" else "--%",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = if (hasSleepData) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -814,7 +837,8 @@ fun Spo2Card(
     latestSample: OxygenSaturationSample?,
     history: List<OxygenSaturationSample>
 ) {
-    val spo2Val = latestSample?.percentage ?: 98.0f
+    val hasSample = latestSample != null
+    val spo2Val = if (hasSample) latestSample!!.percentage else 0f
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -851,43 +875,68 @@ fun Spo2Card(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    text = "${spo2Val.toInt()}",
-                    style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = "%",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = CyberCyan,
-                    modifier = Modifier.padding(bottom = 6.dp)
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                Text(
-                    text = "Optimal Oxygenation",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = NeonEmerald,
+            if (hasSample) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = "${spo2Val.toInt()}",
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "%",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = CyberCyan,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    val isOptimal = spo2Val >= 95f
+                    Text(
+                        text = if (isOptimal) "Optimal Oxygenation" else "Sub-optimal",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (isOptimal) NeonEmerald else Color(0xFFF59E0B),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background((if (isOptimal) NeonEmerald else Color(0xFFF59E0B)).copy(alpha = 0.15f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                LinearProgressIndicator(
+                    progress = { (spo2Val / 100f).coerceIn(0f, 1f) },
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(NeonEmerald.copy(alpha = 0.15f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp)),
+                    color = CyberCyan,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            } else {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = "--",
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "%",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "No SpO₂ recordings yet • Tap Measure below",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            LinearProgressIndicator(
-                progress = { (spo2Val / 100f).coerceIn(0f, 1f) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp)),
-                color = CyberCyan,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant
-            )
         }
     }
 }
@@ -956,6 +1005,30 @@ fun GalaxyRingTopBar(
             }
         },
         actions = {
+            Button(
+                onClick = onAdminClick,
+                modifier = Modifier.testTag("topbar_admin_button"),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = CyberCyan),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.BugReport,
+                    contentDescription = "Admin / Debug",
+                    tint = Color(0xFF0F172A),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Admin",
+                    color = Color(0xFF0F172A),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp
+                )
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+            val hasBattery = snapshot.battery.timestamp != 0L || snapshot.battery.level > 0
+            val batteryText = if (hasBattery) "${snapshot.battery.level}%" else "--%"
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -966,12 +1039,12 @@ fun GalaxyRingTopBar(
                 Icon(
                     imageVector = if (snapshot.battery.isCharging) Icons.Default.BatteryChargingFull else Icons.Default.BatteryFull,
                     contentDescription = "Battery",
-                    tint = if (snapshot.battery.level > 20) NeonEmerald else RosePulse,
+                    tint = if (hasBattery && snapshot.battery.level > 20) NeonEmerald else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "${snapshot.battery.level}%",
+                    text = batteryText,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -1294,6 +1367,8 @@ fun HeartRateCard(
     latestSample: HeartRateSample,
     history: List<HeartRateSample>
 ) {
+    val hasHr = latestSample.bpm > 0
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -1321,7 +1396,7 @@ fun HeartRateCard(
                     )
                 }
                 Text(
-                    text = "Resting: 62 bpm",
+                    text = if (hasHr) "Resting PPG" else "No Data",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1329,29 +1404,53 @@ fun HeartRateCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            Row(verticalAlignment = Alignment.Bottom) {
+            if (hasHr) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = "${latestSample.bpm}",
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "BPM",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = RosePulse,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        text = "Zone: Resting",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = NeonEmerald,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(NeonEmerald.copy(alpha = 0.15f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            } else {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = "--",
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "BPM",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "${latestSample.bpm}",
-                    style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "BPM",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = RosePulse,
-                    modifier = Modifier.padding(bottom = 6.dp)
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                Text(
-                    text = "Zone: Resting",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = NeonEmerald,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(NeonEmerald.copy(alpha = 0.15f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                    text = "No heart rate readings yet • Tap Measure below",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
@@ -1532,6 +1631,8 @@ fun SkinTempCard(temp: com.galaxy.ring.data.SkinTemperature) {
 
 @Composable
 fun BatteryCard(battery: com.galaxy.ring.data.RingBattery) {
+    val hasBattery = battery.timestamp != 0L || battery.level > 0
+
     Card(
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -1540,12 +1641,12 @@ fun BatteryCard(battery: com.galaxy.ring.data.RingBattery) {
             Icon(
                 imageVector = if (battery.isCharging) Icons.Default.BatteryChargingFull else Icons.Default.BatteryFull,
                 contentDescription = "Battery",
-                tint = NeonEmerald,
+                tint = if (hasBattery && battery.level > 20) NeonEmerald else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)
             )
             Spacer(modifier = Modifier.height(10.dp))
             Text(
-                text = "${battery.level}%",
+                text = if (hasBattery) "${battery.level}%" else "--%",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -1557,9 +1658,15 @@ fun BatteryCard(battery: com.galaxy.ring.data.RingBattery) {
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = if (battery.isCharging) "Charging now" else "~${battery.estimatedDaysLeft.toInt()} days left",
+                text = if (!hasBattery) {
+                    "Awaiting ring status"
+                } else if (battery.isCharging) {
+                    "Charging now"
+                } else {
+                    "~${battery.estimatedDaysLeft.toInt()} days left"
+                },
                 style = MaterialTheme.typography.labelSmall,
-                color = NeonEmerald
+                color = if (hasBattery) NeonEmerald else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
