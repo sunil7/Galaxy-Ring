@@ -133,10 +133,8 @@ class BleRepository(
                 _snapshot.value = _snapshot.value.copy(latestHeartRate = hr, heartRateHistory = updatedHistory)
 
                 val measuringHR = (_manualMeasurementState.value as? ManualMeasurementState.Measuring)?.metric == "Heart Rate"
-                if (!measuringHR) {
-                    healthRepository.saveHeartRate(bpm = hr.bpm, timestamp = hr.timestamp, isManual = false)
-                    healthWriter.writeHeartRateSample(hr, isManual = false)
-                }
+                healthRepository.saveHeartRate(bpm = hr.bpm, timestamp = hr.timestamp, isManual = measuringHR)
+                healthWriter.writeHeartRateSample(hr, isManual = measuringHR)
             }
         }
 
@@ -151,10 +149,8 @@ class BleRepository(
                 _snapshot.value = _snapshot.value.copy(latestOxygenSaturation = spo2, oxygenSaturationHistory = updatedHistory)
 
                 val measuringSpo2 = (_manualMeasurementState.value as? ManualMeasurementState.Measuring)?.metric == "SpO₂"
-                if (!measuringSpo2) {
-                    healthRepository.saveOxygenSaturation(percentage = spo2.percentage, timestamp = spo2.timestamp, isManual = false)
-                    healthWriter.writeOxygenSaturationSample(spo2, isManual = false)
-                }
+                healthRepository.saveOxygenSaturation(percentage = spo2.percentage, timestamp = spo2.timestamp, isManual = measuringSpo2)
+                healthWriter.writeOxygenSaturationSample(spo2, isManual = measuringSpo2)
             }
         }
 
@@ -467,21 +463,29 @@ class BleRepository(
                     return@launch
                 }
 
-                // Wait up to ~60s (per spec) or until reading arrives
+                // Wait up to ~60s or until reading arrives
                 val maxWaitMs = 60000L
                 val pollStepMs = 500L
                 val totalSteps = (maxWaitMs / pollStepMs).toInt()
-                var sampleFound: HeartRateSample? = null
+                var latestNonzeroHr: HeartRateSample? = null
+
+                var statusCompleteReceived = false
+                val completionJob = launch {
+                    bleManager.measureCompletedFlow.collect { type ->
+                        if (type == Protocol.MEASURE_TYPE_HR || type == 0x00.toByte()) {
+                            statusCompleteReceived = true
+                        }
+                    }
+                }
 
                 for (step in 1..totalSteps) {
                     delay(pollStepMs)
-                    val latest = _snapshot.value.latestHeartRate
-                    if (latest.timestamp >= startTime && latest.bpm in 30..240) {
-                        sampleFound = latest
-                        break
+                    val current = _snapshot.value.latestHeartRate
+                    if (current != null && current.timestamp >= startTime && current.bpm in 30..220) {
+                        latestNonzeroHr = current
                     }
-                    if (!bleManager.isMeasuringActive) {
-                        // Ring signaled completion via 0609 status
+                    if (statusCompleteReceived || !bleManager.isMeasuringActive) {
+                        AppLog.i(tagBle, "Heart Rate measurement finished by ring 0609 status complete")
                         break
                     }
                     val progress = (step.toFloat() / totalSteps.toFloat()).coerceIn(0.05f, 0.95f)
@@ -490,40 +494,39 @@ class BleRepository(
                     }
                 }
 
-                // Stop measurement
-                bleManager.stopHeartRateMeasurement(gatt)
+                completionJob.cancel()
 
-                if (sampleFound != null) {
-                    healthRepository.saveHeartRate(bpm = sampleFound.bpm, timestamp = sampleFound.timestamp, isManual = true)
-                    healthWriter.writeHeartRateSample(sampleFound, isManual = true)
-                    val displayStr = "${sampleFound.bpm} BPM"
+                // Always send stop 0609 when finishing
+                try {
+                    bleManager.stopHeartRateMeasurement(gatt)
+                } catch (e: Exception) {
+                    AppLog.w(tagBle, "Error stopping Heart Rate measurement: ${e.message}")
+                }
+
+                // Final check on latest reading
+                val finalCurrent = _snapshot.value.latestHeartRate
+                if (finalCurrent != null && finalCurrent.timestamp >= startTime && finalCurrent.bpm in 30..220) {
+                    latestNonzeroHr = finalCurrent
+                }
+
+                if (latestNonzeroHr != null) {
+                    healthRepository.saveHeartRate(bpm = latestNonzeroHr.bpm, timestamp = latestNonzeroHr.timestamp, isManual = true)
+                    healthWriter.writeHeartRateSample(latestNonzeroHr, isManual = true)
+                    val displayStr = "${latestNonzeroHr.bpm} BPM"
                     _manualMeasurementState.value = ManualMeasurementState.Success(
                         metric = "Heart Rate",
                         displayValue = displayStr,
-                        timestamp = sampleFound.timestamp
+                        timestamp = latestNonzeroHr.timestamp
                     )
                     AppLog.lastMeasureResult = "Heart Rate: $displayStr (Success)"
                     AppLog.i(tagBle, "Manual Heart Rate measurement succeeded: $displayStr")
                 } else {
-                    val rxSince = bleManager.getLastRxSince(startTime)
-                    val errorReason = if (rxSince != null) {
-                        val (byteCount, hex) = rxSince
-                        val truncatedHex = if (hex.length > 36) hex.take(33) + "…" else hex
-                        "Ring replied ($byteCount bytes) but no valid HR sample received. Last RX: $truncatedHex. Export logs."
-                    } else {
-                        val lastKnownRx = bleManager.lastRxHex
-                        if (lastKnownRx != null) {
-                            val truncatedHex = if (lastKnownRx.length > 36) lastKnownRx.take(33) + "…" else lastKnownRx
-                            "Measurement timed out (60s). Last RX: $truncatedHex. See Admin → Logs for TX/RX hex."
-                        } else {
-                            "Measurement timed out (60s). See Admin → Logs for TX/RX hex."
-                        }
-                    }
-                    AppLog.w(tagBle, "Manual Heart Rate measurement TIMEOUT (60s): $errorReason")
-                    AppLog.lastMeasureResult = "Heart Rate: Error - $errorReason"
+                    val errMsg = "sensor ran but value stayed 0"
+                    AppLog.w(tagBle, "Manual Heart Rate measurement ended without nonzero sample: $errMsg")
+                    AppLog.lastMeasureResult = "Heart Rate: Error - $errMsg"
                     _manualMeasurementState.value = ManualMeasurementState.Error(
                         metric = "Heart Rate",
-                        message = errorReason
+                        message = errMsg
                     )
                 }
             } catch (e: Exception) {
@@ -571,17 +574,25 @@ class BleRepository(
                 val maxWaitMs = 60000L
                 val pollStepMs = 500L
                 val totalSteps = (maxWaitMs / pollStepMs).toInt()
-                var sampleFound: OxygenSaturationSample? = null
+                var latestNonzeroSpo2: OxygenSaturationSample? = null
+
+                var statusCompleteReceived = false
+                val completionJob = launch {
+                    bleManager.measureCompletedFlow.collect { type ->
+                        if (type == Protocol.MEASURE_TYPE_SPO2 || type == 0x00.toByte()) {
+                            statusCompleteReceived = true
+                        }
+                    }
+                }
 
                 for (step in 1..totalSteps) {
                     delay(pollStepMs)
-                    val latest = _snapshot.value.latestOxygenSaturation
-                    if (latest != null && latest.timestamp >= startTime && latest.percentage in 70f..100f) {
-                        sampleFound = latest
-                        break
+                    val current = _snapshot.value.latestOxygenSaturation
+                    if (current != null && current.timestamp >= startTime && current.percentage in 70f..100f) {
+                        latestNonzeroSpo2 = current
                     }
-                    if (!bleManager.isMeasuringActive) {
-                        // Ring signaled completion
+                    if (statusCompleteReceived || !bleManager.isMeasuringActive) {
+                        AppLog.i(tagBle, "SpO2 measurement finished by ring 0609 status complete")
                         break
                     }
                     val progress = (step.toFloat() / totalSteps.toFloat()).coerceIn(0.05f, 0.95f)
@@ -590,40 +601,39 @@ class BleRepository(
                     }
                 }
 
-                // Stop measurement
-                bleManager.stopSpO2Measurement(gatt)
+                completionJob.cancel()
 
-                if (sampleFound != null) {
-                    healthRepository.saveOxygenSaturation(percentage = sampleFound.percentage, timestamp = sampleFound.timestamp, isManual = true)
-                    healthWriter.writeOxygenSaturationSample(sampleFound, isManual = true)
-                    val displayStr = "${sampleFound.percentage.toInt()}%"
+                // Always send stop 0609 when finishing
+                try {
+                    bleManager.stopSpO2Measurement(gatt)
+                } catch (e: Exception) {
+                    AppLog.w(tagBle, "Error stopping SpO2 measurement: ${e.message}")
+                }
+
+                // Final check on latest reading
+                val finalCurrent = _snapshot.value.latestOxygenSaturation
+                if (finalCurrent != null && finalCurrent.timestamp >= startTime && finalCurrent.percentage in 70f..100f) {
+                    latestNonzeroSpo2 = finalCurrent
+                }
+
+                if (latestNonzeroSpo2 != null) {
+                    healthRepository.saveOxygenSaturation(percentage = latestNonzeroSpo2.percentage, timestamp = latestNonzeroSpo2.timestamp, isManual = true)
+                    healthWriter.writeOxygenSaturationSample(latestNonzeroSpo2, isManual = true)
+                    val displayStr = "${latestNonzeroSpo2.percentage.toInt()}%"
                     _manualMeasurementState.value = ManualMeasurementState.Success(
                         metric = "SpO₂",
                         displayValue = displayStr,
-                        timestamp = sampleFound.timestamp
+                        timestamp = latestNonzeroSpo2.timestamp
                     )
                     AppLog.lastMeasureResult = "SpO₂: $displayStr (Success)"
                     AppLog.i(tagBle, "Manual SpO₂ measurement succeeded: $displayStr")
                 } else {
-                    val rxSince = bleManager.getLastRxSince(startTime)
-                    val errorReason = if (rxSince != null) {
-                        val (byteCount, hex) = rxSince
-                        val truncatedHex = if (hex.length > 36) hex.take(33) + "…" else hex
-                        "Ring replied ($byteCount bytes) but no valid SpO₂ sample received. Last RX: $truncatedHex. Export logs."
-                    } else {
-                        val lastKnownRx = bleManager.lastRxHex
-                        if (lastKnownRx != null) {
-                            val truncatedHex = if (lastKnownRx.length > 36) lastKnownRx.take(33) + "…" else lastKnownRx
-                            "Measurement timed out (60s). Last RX: $truncatedHex. See Admin → Logs for TX/RX hex."
-                        } else {
-                            "Measurement timed out (60s). See Admin → Logs for TX/RX hex."
-                        }
-                    }
-                    AppLog.w(tagBle, "Manual SpO₂ measurement TIMEOUT (60s): $errorReason")
-                    AppLog.lastMeasureResult = "SpO₂: Error - $errorReason"
+                    val errMsg = "sensor ran but value stayed 0"
+                    AppLog.w(tagBle, "Manual SpO₂ measurement ended without nonzero sample: $errMsg")
+                    AppLog.lastMeasureResult = "SpO₂: Error - $errMsg"
                     _manualMeasurementState.value = ManualMeasurementState.Error(
                         metric = "SpO₂",
-                        message = errorReason
+                        message = errMsg
                     )
                 }
             } catch (e: Exception) {

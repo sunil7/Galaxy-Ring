@@ -439,45 +439,53 @@ object Protocol {
     }
 
     /**
-     * Parses readings from an unsolicited push frame (Flag 0x21).
-     * key 0x0224 = HR
-     * key 0x024E = SpO2
-     * After key + keyFlag (3 bytes), records are structured as 6-byte entries:
-     *   timestamp(4 BE uint32) + value(1 byte) + extra(1 byte)
-     * value = bpm or SpO2 %; 0 is "no reading yet"; extracts the newest nonzero reading.
+     * Parses biometric readings from ANY frame with key 0x0224 (HR) or 0x024E (SpO2),
+     * regardless of frame flag (0x01, 0x11, 0x21).
+     *
+     * Payload layout after frame header:
+     *   key(2 BE) + keyFlag(1) + data
+     *   data: timestamp(4 BE) + value(1) + optional trailing byte
+     *   value = data[4] (the byte immediately after the 4-byte timestamp)
+     *
+     * Value ranges:
+     *   HR (0x0224): 30..220 BPM (value 0 ignored)
+     *   SpO2 (0x024E): 70..100% (value 0 ignored)
      */
-    fun parseBiometricPush(frame: Frame): Pair<HeartRateSample?, OxygenSaturationSample?> {
-        if (frame.data.isEmpty()) return Pair(null, null)
+    fun parseBiometricFrame(frame: Frame): Pair<HeartRateSample?, OxygenSaturationSample?> {
+        val key = frame.key
+        if (key != KEY_HR_PUSH && key != KEY_SPO2_PUSH) {
+            return Pair(null, null)
+        }
+
+        val data = frame.data
+        if (data.size < 5) {
+            return Pair(null, null)
+        }
 
         val now = System.currentTimeMillis()
         var latestHr: HeartRateSample? = null
         var latestSpo2: OxygenSaturationSample? = null
 
-        val data = frame.data
-        // Read 6-byte records: timestamp(4 BE) + value(1) + flag/reserved(1)
-        val recordCount = data.size / 6
-        if (recordCount > 0) {
-            for (i in 0 until recordCount) {
-                val recOffset = i * 6
-                val value = data[recOffset + 4].toInt() and 0xFF
+        // Support both single 5-6 byte record and multiple 6-byte records
+        val recordCount = (data.size / 6).coerceAtLeast(1)
+        for (i in 0 until recordCount) {
+            val offset = i * 6
+            if (offset + 4 >= data.size) break
+            val value = data[offset + 4].toInt() and 0xFF
 
-                if (frame.key == KEY_HR_PUSH) {
-                    if (value in 30..240) {
-                        latestHr = HeartRateSample(bpm = value, confidence = 100, timestamp = now)
-                    }
-                } else if (frame.key == KEY_SPO2_PUSH) {
-                    if (value in 70..100) {
-                        latestSpo2 = OxygenSaturationSample(percentage = value.toFloat(), timestamp = now)
-                    }
-                }
+            if (value == 0) {
+                // value 0 = ignore (no reading yet)
+                continue
             }
-        } else if (data.isNotEmpty()) {
-            // Direct single value fallback if not chunked in 6-byte records
-            val value = data[0].toInt() and 0xFF
-            if (frame.key == KEY_HR_PUSH && value in 30..240) {
-                latestHr = HeartRateSample(bpm = value, confidence = 100, timestamp = now)
-            } else if (frame.key == KEY_SPO2_PUSH && value in 70..100) {
-                latestSpo2 = OxygenSaturationSample(percentage = value.toFloat(), timestamp = now)
+
+            if (key == KEY_HR_PUSH) {
+                if (value in 30..220) {
+                    latestHr = HeartRateSample(bpm = value, confidence = 100, timestamp = now)
+                }
+            } else if (key == KEY_SPO2_PUSH) {
+                if (value in 70..100) {
+                    latestSpo2 = OxygenSaturationSample(percentage = value.toFloat(), timestamp = now)
+                }
             }
         }
 
@@ -485,21 +493,67 @@ object Protocol {
     }
 
     /**
-     * Checks if key 0x0609 frame indicates measurement complete.
-     * Frame format: key 0x0609, data has status.
-     * If payload[5] == 0 (which corresponds to data index 2 == 0) -> measurement completed.
+     * Backward-compatible alias for parseBiometricFrame.
      */
-    fun isMeasurementCompletedStatus(frame: Frame): Boolean {
+    fun parseBiometricPush(frame: Frame): Pair<HeartRateSample?, OxygenSaturationSample?> {
+        return parseBiometricFrame(frame)
+    }
+
+    /**
+     * Direct parser for a biometric payload byte array (key(2) + keyFlag(1) + data).
+     * e.g. "02 24 00 32 5D 6F 59 3F 00" -> bpm=63
+     */
+    fun parseBiometricPayload(payload: ByteArray): Pair<HeartRateSample?, OxygenSaturationSample?> {
+        if (payload.size < 8) return Pair(null, null)
+        val key = ((payload[0].toInt() and 0xFF) shl 8) or (payload[1].toInt() and 0xFF)
+        val keyFlag = payload[2]
+        val data = payload.copyOfRange(3, payload.size)
+        val frame = Frame(
+            flag = FLAG_ACK,
+            key = key,
+            keyFlag = keyFlag,
+            data = data,
+            fullPayload = payload,
+            crcOk = true
+        )
+        return parseBiometricFrame(frame)
+    }
+
+    /**
+     * Checks if key 0x0609 frame indicates measurement complete.
+     * Measurement status complete received from ring:
+     *   06 09 00 03 05 00  (HR done, type=0x03)
+     *   06 09 00 09 05 00  (SpO2 done, type=0x09)
+     * Payload ends with [type, 0x05, 0x00].
+     */
+    fun isMeasurementCompletedStatus(frame: Frame, expectedType: Byte? = null): Boolean {
         if (frame.key != KEY_MEASURE_CONTROL) return false
-        // Payload: [06 09] [keyFlag] [data: type, 0x05, status]
-        // Payload index 5 is data index 2
-        return if (frame.fullPayload.size >= 6) {
-            frame.fullPayload[5].toInt() == 0
-        } else if (frame.data.size >= 3) {
-            frame.data[2].toInt() == 0
-        } else {
-            false
+        val p = frame.fullPayload
+        if (p.size >= 5) {
+            val len = p.size
+            val has0500 = (p[len - 2].toInt() and 0xFF == 0x05) && (p[len - 1].toInt() and 0xFF == 0x00)
+            if (!has0500) return false
+            if (expectedType != null) {
+                return len >= 3 && p[len - 3] == expectedType
+            }
+            return true
         }
+        return false
+    }
+
+    /**
+     * Returns the measurement type (0x03 HR or 0x09 SpO2) if frame is a 0609 completion frame.
+     */
+    fun getCompletedMeasurementType(frame: Frame): Byte? {
+        if (frame.key != KEY_MEASURE_CONTROL) return null
+        val p = frame.fullPayload
+        if (p.size >= 5) {
+            val len = p.size
+            if ((p[len - 2].toInt() and 0xFF == 0x05) && (p[len - 1].toInt() and 0xFF == 0x00)) {
+                return p[len - 3]
+            }
+        }
+        return null
     }
 
     /**

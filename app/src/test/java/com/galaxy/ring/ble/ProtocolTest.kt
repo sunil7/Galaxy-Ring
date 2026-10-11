@@ -153,4 +153,107 @@ class ProtocolTest {
         assertNotNull(battery)
         assertEquals(85, battery?.level)
     }
+
+    @Test
+    fun testParseRealHrPayloadFromLogs() {
+        // Confirmed from real SR16 logs:
+        // key=0x0224 payload: 02 24 00 32 5D 6F 59 3F 00 -> value byte 0x3F = 63 bpm
+        val payload = bytesFromHex("02 24 00 32 5D 6F 59 3F 00")
+        val (hr, spo2) = Protocol.parseBiometricPayload(payload)
+
+        assertNotNull(hr)
+        assertEquals(63, hr?.bpm)
+        assertNull(spo2)
+    }
+
+    @Test
+    fun testParseRealSpo2PayloadFromLogs() {
+        // Confirmed from real SR16 logs:
+        // key=0x024E payload: 02 4E 00 32 5D 6F 9C 61 00 -> value byte 0x61 = 97%
+        val payload = bytesFromHex("02 4E 00 32 5D 6F 9C 61 00")
+        val (hr, spo2) = Protocol.parseBiometricPayload(payload)
+
+        assertNull(hr)
+        assertNotNull(spo2)
+        assertEquals(97f, spo2?.percentage ?: 0f, 0.01f)
+    }
+
+    @Test
+    fun testParseBiometricFrameRegardlessOfFlag() {
+        // Frame received with Flag 0x11 (ACK-style, as seen in real logs)
+        val payload = bytesFromHex("02 24 00 32 5D 6F 59 3F 00")
+        val crc = Protocol.crc16Arc(payload)
+        val frameBytes = byteArrayOf(
+            0xAB.toByte(),
+            Protocol.FLAG_ACK, // 0x11!
+            (payload.size shr 8).toByte(),
+            (payload.size and 0xFF).toByte(),
+            (crc shr 8).toByte(),
+            (crc and 0xFF).toByte()
+        ) + payload
+
+        val (frames, _) = Protocol.parseFramesFromStream(frameBytes)
+        assertEquals(1, frames.size)
+        assertEquals(Protocol.FLAG_ACK, frames[0].flag)
+        assertEquals(Protocol.KEY_HR_PUSH, frames[0].key)
+
+        val (hr, _) = Protocol.parseBiometricFrame(frames[0])
+        assertNotNull(hr)
+        assertEquals(63, hr?.bpm)
+    }
+
+    @Test
+    fun testBiometricZeroValueIgnored() {
+        // Value 0 is "no reading yet" and must be ignored
+        val payload = bytesFromHex("02 24 00 32 5D 6F 59 00 00")
+        val (hr, spo2) = Protocol.parseBiometricPayload(payload)
+        assertNull(hr)
+        assertNull(spo2)
+    }
+
+    @Test
+    fun testMeasurementCompletedStatusFrames() {
+        // 06 09 00 03 05 00 (HR done)
+        val hrDonePayload = bytesFromHex("06 09 00 03 05 00")
+        val hrDoneFrame = Protocol.Frame(
+            flag = Protocol.FLAG_ACK,
+            key = Protocol.KEY_MEASURE_CONTROL,
+            keyFlag = 0x00,
+            data = hrDonePayload.copyOfRange(3, 6),
+            fullPayload = hrDonePayload,
+            crcOk = true
+        )
+        assertTrue(Protocol.isMeasurementCompletedStatus(hrDoneFrame))
+        assertTrue(Protocol.isMeasurementCompletedStatus(hrDoneFrame, Protocol.MEASURE_TYPE_HR))
+        assertFalse(Protocol.isMeasurementCompletedStatus(hrDoneFrame, Protocol.MEASURE_TYPE_SPO2))
+        assertEquals(Protocol.MEASURE_TYPE_HR, Protocol.getCompletedMeasurementType(hrDoneFrame))
+
+        // 06 09 00 09 05 00 (SpO2 done)
+        val spo2DonePayload = bytesFromHex("06 09 00 09 05 00")
+        val spo2DoneFrame = Protocol.Frame(
+            flag = Protocol.FLAG_ACK,
+            key = Protocol.KEY_MEASURE_CONTROL,
+            keyFlag = 0x00,
+            data = spo2DonePayload.copyOfRange(3, 6),
+            fullPayload = spo2DonePayload,
+            crcOk = true
+        )
+        assertTrue(Protocol.isMeasurementCompletedStatus(spo2DoneFrame))
+        assertTrue(Protocol.isMeasurementCompletedStatus(spo2DoneFrame, Protocol.MEASURE_TYPE_SPO2))
+        assertFalse(Protocol.isMeasurementCompletedStatus(spo2DoneFrame, Protocol.MEASURE_TYPE_HR))
+        assertEquals(Protocol.MEASURE_TYPE_SPO2, Protocol.getCompletedMeasurementType(spo2DoneFrame))
+
+        // Start response (06 09 00 03 01 00) must NOT be complete status
+        val startAckPayload = bytesFromHex("06 09 00 03 01 00")
+        val startAckFrame = Protocol.Frame(
+            flag = Protocol.FLAG_ACK,
+            key = Protocol.KEY_MEASURE_CONTROL,
+            keyFlag = 0x00,
+            data = startAckPayload.copyOfRange(3, 6),
+            fullPayload = startAckPayload,
+            crcOk = true
+        )
+        assertFalse(Protocol.isMeasurementCompletedStatus(startAckFrame))
+        assertNull(Protocol.getCompletedMeasurementType(startAckFrame))
+    }
 }

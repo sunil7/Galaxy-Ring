@@ -109,6 +109,12 @@ class GalaxyRingBLEManager(
     // Measurement active tracker
     @Volatile var isMeasuringActive: Boolean = false
         private set
+    @Volatile var activeMeasureType: Byte? = null
+        private set
+
+    // Measurement completion flow (emits completed metric type: 0x03 HR or 0x09 SpO2)
+    private val _measureCompletedFlow = MutableSharedFlow<Byte>(extraBufferCapacity = 16)
+    val measureCompletedFlow: SharedFlow<Byte> = _measureCompletedFlow.asSharedFlow()
 
     // Initialization State
     sealed class InitState {
@@ -145,8 +151,8 @@ class GalaxyRingBLEManager(
         lastRxHex = null
         lastRxTimestamp = 0L
         lastRxBytesCount = 0
-        lastFailedInitStep = null
         isMeasuringActive = false
+        activeMeasureType = null
         _initState.value = InitState.Idle
 
         servicesConfigured = false
@@ -424,14 +430,43 @@ class GalaxyRingBLEManager(
                     "RX Frame #${rxCountSinceConnect} [key=0x${"%04X".format(frame.key)}, keyFlag=0x${"%02X".format(frame.keyFlag)}, $flagStr, CRC OK]: $payloadHex"
                 )
 
-                // 1. Reply to pending command
+                // 1. Parse ANY biometric frame with key 0x0224 (HR) or 0x024E (SpO2) REGARDLESS OF FLAG
+                if (frame.key == Protocol.KEY_HR_PUSH || frame.key == Protocol.KEY_SPO2_PUSH) {
+                    handleBiometricFrame(frame)
+                }
+
+                // 2. Status updates (Key 0x0609 measurement completed: payload ends with type, 0x05, 0x00)
+                if (frame.key == Protocol.KEY_MEASURE_CONTROL) {
+                    val completedType = Protocol.getCompletedMeasurementType(frame)
+                    if (completedType != null) {
+                        val typeName = when (completedType) {
+                            Protocol.MEASURE_TYPE_HR -> "Heart Rate"
+                            Protocol.MEASURE_TYPE_SPO2 -> "SpO2"
+                            else -> "0x${"%02X".format(completedType)}"
+                        }
+                        AppLog.i(tag, "Measurement status frame (0x0609): complete=true for $typeName")
+                        isMeasuringActive = false
+                        activeMeasureType = null
+                        _measureCompletedFlow.tryEmit(completedType)
+                    } else {
+                        val isComplete = Protocol.isMeasurementCompletedStatus(frame)
+                        if (isComplete) {
+                            AppLog.i(tag, "Measurement status frame (0x0609): complete=true")
+                            isMeasuringActive = false
+                            activeMeasureType = null
+                            _measureCompletedFlow.tryEmit(0x00)
+                        }
+                    }
+                }
+
+                // 3. Reply to pending command (only complete if matching key and not unsolicited push)
                 val pendingKey = pendingCommandKey
                 if (pendingKey != null && pendingKey == frame.key && frame.flag != Protocol.FLAG_PUSH) {
                     AppLog.i(tag, "Matching reply received for pending command key 0x${"%04X".format(pendingKey)}")
                     pendingCommandDeferred?.complete(frame)
                 }
 
-                // 2. If incoming flag == 0x01: immediately send ACK (AB 11 00 03 crc16 key(2) keyFlag)
+                // 4. If incoming flag == 0x01: immediately send ACK (AB 11 00 03 crc16 key(2) keyFlag)
                 if (frame.flag == Protocol.FLAG_COMMAND && gatt != null) {
                     scope.launch {
                         try {
@@ -444,40 +479,26 @@ class GalaxyRingBLEManager(
                         }
                     }
                 }
-
-                // 3. Flag 0x21: Unsolicited push - parse biometrics, do NOT ACK, do NOT complete pending command
-                if (frame.flag == Protocol.FLAG_PUSH) {
-                    handlePushFrame(frame)
-                }
-
-                // 4. Status updates (e.g. Key 0x0609 measurement completed)
-                if (frame.key == Protocol.KEY_MEASURE_CONTROL) {
-                    val isComplete = Protocol.isMeasurementCompletedStatus(frame)
-                    AppLog.i(tag, "Measurement status frame (0x0609): complete=$isComplete")
-                    if (isComplete) {
-                        isMeasuringActive = false
-                    }
-                }
             }
         } catch (e: Exception) {
             AppLog.e(tag, "Exception in onNotificationReceived: ${e.message}", e)
         }
     }
 
-    private fun handlePushFrame(frame: Protocol.Frame) {
+    private fun handleBiometricFrame(frame: Protocol.Frame) {
         scope.launch {
             try {
-                val (hr, spo2) = Protocol.parseBiometricPush(frame)
+                val (hr, spo2) = Protocol.parseBiometricFrame(frame)
                 if (hr != null) {
-                    AppLog.i(tag, "Biometric PUSH: Heart Rate = ${hr.bpm} BPM")
+                    AppLog.i(tag, "HR sample parsed: ${hr.bpm} BPM from 0224")
                     _heartRateFlow.emit(hr)
                 }
                 if (spo2 != null) {
-                    AppLog.i(tag, "Biometric PUSH: SpO2 = ${spo2.percentage}%")
+                    AppLog.i(tag, "SpO2 sample parsed: ${spo2.percentage.toInt()}% from 024E")
                     _spo2Flow.emit(spo2)
                 }
             } catch (e: Exception) {
-                AppLog.e(tag, "Error handling push frame: ${e.message}", e)
+                AppLog.e(tag, "Error handling biometric frame: ${e.message}", e)
             }
         }
     }
@@ -724,6 +745,7 @@ class GalaxyRingBLEManager(
 
     suspend fun startHeartRateMeasurement(gatt: BluetoothGatt): Boolean {
         isMeasuringActive = true
+        activeMeasureType = Protocol.MEASURE_TYPE_HR
         val frame = Protocol.buildHeartRateStartCommand()
         val reply = executeCommand(gatt, frame, Protocol.KEY_MEASURE_CONTROL, timeoutMs = 5000L)
         return reply != null
@@ -731,6 +753,7 @@ class GalaxyRingBLEManager(
 
     suspend fun stopHeartRateMeasurement(gatt: BluetoothGatt): Boolean {
         isMeasuringActive = false
+        activeMeasureType = null
         val frame = Protocol.buildHeartRateStopCommand()
         val reply = executeCommand(gatt, frame, Protocol.KEY_MEASURE_CONTROL, timeoutMs = 5000L)
         return reply != null
@@ -738,6 +761,7 @@ class GalaxyRingBLEManager(
 
     suspend fun startSpO2Measurement(gatt: BluetoothGatt): Boolean {
         isMeasuringActive = true
+        activeMeasureType = Protocol.MEASURE_TYPE_SPO2
         val frame = Protocol.buildSpO2StartCommand()
         val reply = executeCommand(gatt, frame, Protocol.KEY_MEASURE_CONTROL, timeoutMs = 5000L)
         return reply != null
@@ -745,6 +769,7 @@ class GalaxyRingBLEManager(
 
     suspend fun stopSpO2Measurement(gatt: BluetoothGatt): Boolean {
         isMeasuringActive = false
+        activeMeasureType = null
         val frame = Protocol.buildSpO2StopCommand()
         val reply = executeCommand(gatt, frame, Protocol.KEY_MEASURE_CONTROL, timeoutMs = 5000L)
         return reply != null
