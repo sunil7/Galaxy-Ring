@@ -43,7 +43,17 @@ class RingScheduledService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        AppLog.i(tag, "RingScheduledService starting foreground monitoring...")
+        val app = applicationContext as? GalaxyRingApp
+        val repo = app?.healthRepository
+        val shouldRun = (repo?.isKeepConnected == true) || (repo?.isScheduleEnabled == true)
+
+        if (!shouldRun) {
+            AppLog.i(tag, "RingScheduledService: both schedule and keep-connected are OFF. Stopping service.")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        AppLog.i(tag, "RingScheduledService starting foreground monitoring (keepConnected=${repo?.isKeepConnected}, schedule=${repo?.isScheduleEnabled})...")
 
         try {
             val notification = buildPersistentNotification()
@@ -62,68 +72,64 @@ class RingScheduledService : Service() {
             return START_NOT_STICKY
         }
 
-        startScheduledLoop()
+        startMonitoringLoop()
         return START_STICKY
     }
 
-    private fun startScheduledLoop() {
+    private fun startMonitoringLoop() {
         scheduledLoopJob?.cancel()
         scheduledLoopJob = scope.launch {
             val app = applicationContext as? GalaxyRingApp ?: return@launch
             val repo = app.healthRepository
             val bleRepo = app.bleRepository
 
-            AppLog.i(tag, "Started scheduled monitoring loop. Interval: ${repo.scheduleIntervalMinutes}m")
+            AppLog.i(tag, "Foreground service monitoring loop started. Schedule=${repo.isScheduleEnabled} (interval=${repo.scheduleIntervalMinutes}m), KeepConnected=${repo.isKeepConnected}")
 
-            while (isActive && repo.isScheduleEnabled) {
-                val intervalMillis = repo.scheduleIntervalMinutes * 60 * 1000L
-                delay(intervalMillis)
+            var lastScheduleCheckTime = System.currentTimeMillis()
 
-                if (!repo.isScheduleEnabled) break
-
-                AppLog.d(tag, "Scheduled check waking up. Executing biometric sampling...")
-                try {
-                    wakeLock?.acquire(15000L) // Safe 15-second partial wakelock
-
-                    // Ensure connection if ring is disconnected and last address is known
-                    val connState = bleRepo.connectionState.value
-                    if (connState !is ConnectionState.Ready && connState !is ConnectionState.Connected) {
-                        val lastAddr = repo.lastConnectedAddress
-                        if (lastAddr != null) {
-                            AppLog.d(tag, "Ring disconnected during scheduled check; connecting to $lastAddr")
-                            bleRepo.connect(lastAddr, repo.lastConnectedName ?: "Galaxy Ring")
-                            delay(3000)
-                        }
-                    }
-
-                    // 1. Measure Heart Rate if enabled
-                    if (repo.scheduleCheckHeartRate) {
-                        AppLog.d(tag, "Running scheduled Heart Rate check...")
-                        bleRepo.measureHeartRate()
-                        delay(2500)
-                    }
-
-                    // 2. Measure SpO2 if enabled
-                    if (repo.scheduleCheckSpo2) {
-                        AppLog.d(tag, "Running scheduled SpO2 check...")
-                        bleRepo.measureOxygenSaturation()
-                        delay(2500)
-                    }
-
-                    // 3. Sync Daily Steps
-                    bleRepo.requestSync()
-                    AppLog.i(tag, "Scheduled biometric sampling completed successfully")
-                } catch (e: Exception) {
-                    AppLog.e(tag, "Error during scheduled biometric check: ${e.message}", e)
-                } finally {
-                    try {
-                        if (wakeLock?.isHeld == true) {
-                            wakeLock?.release()
-                        }
-                    } catch (e: Exception) {
-                        // Safe release
+            while (isActive && (repo.isScheduleEnabled || repo.isKeepConnected)) {
+                // If disconnected and last address known, keep connection alive
+                val connState = bleRepo.connectionState.value
+                if (connState is ConnectionState.Disconnected) {
+                    val lastAddr = repo.lastConnectedAddress
+                    if (lastAddr != null) {
+                        AppLog.i(tag, "FGS keep-alive: ring is disconnected, auto-connecting to $lastAddr...")
+                        bleRepo.connect(lastAddr, repo.lastConnectedName ?: "Galaxy Ring")
                     }
                 }
+
+                // If schedule is enabled, check if interval has elapsed
+                if (repo.isScheduleEnabled) {
+                    val intervalMillis = repo.scheduleIntervalMinutes * 60 * 1000L
+                    val now = System.currentTimeMillis()
+                    if (now - lastScheduleCheckTime >= intervalMillis) {
+                        lastScheduleCheckTime = now
+                        AppLog.i(tag, "Scheduled check timer fired! Executing scheduled biometric check...")
+                        try {
+                            wakeLock?.acquire(45000L) // 45s safe partial wakelock
+                            bleRepo.performScheduledMeasurement(
+                                checkHr = repo.scheduleCheckHeartRate,
+                                checkSpo2 = repo.scheduleCheckSpo2
+                            )
+                        } catch (e: Exception) {
+                            AppLog.e(tag, "Error during scheduled biometric check: ${e.message}", e)
+                        } finally {
+                            try {
+                                if (wakeLock?.isHeld == true) {
+                                    wakeLock?.release()
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+
+                // Poll check every 15 seconds
+                delay(15000L)
+            }
+
+            if (!repo.isScheduleEnabled && !repo.isKeepConnected) {
+                AppLog.i(tag, "Monitoring loop exiting: schedule and keep-connected are both OFF.")
+                stopSelf()
             }
         }
     }
@@ -157,9 +163,18 @@ class RingScheduledService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val repo = app?.healthRepository
+        val isSchedule = repo?.isScheduleEnabled == true
+        val isKeep = repo?.isKeepConnected == true
+        val statusText = when {
+            isSchedule && isKeep -> "Active background monitoring every $interval min (Heart Rate, SpO₂)"
+            isSchedule -> "Scheduled biometric logging active every $interval min"
+            else -> "Ring link maintained in background"
+        }
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Galaxy Ring – scheduled monitoring")
-            .setContentText("Active background monitoring every $interval min (Heart Rate, SpO₂)")
+            .setContentTitle("Galaxy Ring connected — monitoring")
+            .setContentText(statusText)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentIntent(pendingIntent)
             .setOngoing(true)

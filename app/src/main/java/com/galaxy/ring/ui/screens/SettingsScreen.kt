@@ -24,12 +24,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.HealthAndSafety
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -62,10 +65,13 @@ import com.galaxy.ring.GalaxyRingApp
 import com.galaxy.ring.sync.RingScheduledService
 import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
-import android.widget.Toast
-import androidx.compose.material.icons.filled.BugReport
 import com.galaxy.ring.ui.theme.NeonEmerald
 import com.galaxy.ring.ui.theme.RosePulse
+import androidx.compose.material.icons.filled.BugReport
+import android.widget.Toast
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun SettingsScreen(
@@ -78,6 +84,10 @@ fun SettingsScreen(
     val repo = app.healthRepository
     var adminTapCount by remember { mutableIntStateOf(0) }
     var isAdminUnlocked by remember { mutableStateOf(true) }
+
+    var isKeepConnected by remember { mutableStateOf(repo.isKeepConnected) }
+    var isBondingEnabled by remember { mutableStateOf(repo.isBondingEnabled) }
+    var showBatteryPromptDialog by remember { mutableStateOf(false) }
 
     var isScheduleEnabled by remember { mutableStateOf(repo.isScheduleEnabled) }
     var selectedInterval by remember { mutableIntStateOf(repo.scheduleIntervalMinutes) }
@@ -92,6 +102,57 @@ fun SettingsScreen(
     val isIgnoringBatteryOptimizations = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
         powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
     } else true
+
+    fun checkAndPromptBatteryOptimization() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isIgnoringBatteryOptimizations) {
+            showBatteryPromptDialog = true
+        }
+    }
+
+    if (showBatteryPromptDialog) {
+        AlertDialog(
+            onDismissRequest = { showBatteryPromptDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.BatteryAlert,
+                    contentDescription = null,
+                    tint = NeonEmerald
+                )
+            },
+            title = {
+                Text("Samsung / Android Battery Setting")
+            },
+            text = {
+                Text("Samsung One UI and Android power managers put background processes into deep sleep. To keep Galaxy Ring connected and run scheduled checks reliably when the screen is locked, exclude the app from battery restrictions.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showBatteryPromptDialog = false
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            try {
+                                val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                context.startActivity(intent)
+                            } catch (_: Exception) {
+                                val appIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                    data = Uri.fromParts("package", context.packageName, null)
+                                }
+                                context.startActivity(appIntent)
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                ) {
+                    Text("Exclude App", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showBatteryPromptDialog = false }) {
+                    Text("Later")
+                }
+            }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -177,7 +238,135 @@ fun SettingsScreen(
             }
         }
 
-        // 1. Scheduled Checks Section
+        // 1. Connection Keep-Alive & Pairing Section
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(CyberCyan.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Bluetooth,
+                                    contentDescription = null,
+                                    tint = CyberCyan,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Keep ring connected",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Hold GATT connection via foreground service",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = isKeepConnected,
+                            onCheckedChange = { enabled ->
+                                isKeepConnected = enabled
+                                repo.isKeepConnected = enabled
+                                if (enabled) {
+                                    checkAndPromptBatteryOptimization()
+                                    RingScheduledService.start(context)
+                                } else {
+                                    if (!isScheduleEnabled) {
+                                        RingScheduledService.stop(context)
+                                    }
+                                }
+                            },
+                            modifier = Modifier.testTag("keep_connected_toggle"),
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF0F172A), checkedTrackColor = CyberCyan)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(ElectricViolet.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Link,
+                                    contentDescription = null,
+                                    tint = ElectricViolet,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Pair / bond ring",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "OS-level bonding for faster reconnection",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = isBondingEnabled,
+                            onCheckedChange = { enabled ->
+                                isBondingEnabled = enabled
+                                repo.isBondingEnabled = enabled
+                            },
+                            modifier = Modifier.testTag("bonding_toggle"),
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF0F172A), checkedTrackColor = ElectricViolet)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Note: Pairing improves reconnection; keeping the link while the app is closed requires the foreground service notification ('Keep ring connected').",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // 2. Scheduled Checks Section
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -227,9 +416,16 @@ fun SettingsScreen(
                                 isScheduleEnabled = enabled
                                 repo.isScheduleEnabled = enabled
                                 if (enabled) {
+                                    if (!isKeepConnected) {
+                                        isKeepConnected = true
+                                        repo.isKeepConnected = true
+                                    }
+                                    checkAndPromptBatteryOptimization()
                                     RingScheduledService.start(context)
                                 } else {
-                                    RingScheduledService.stop(context)
+                                    if (!isKeepConnected) {
+                                        RingScheduledService.stop(context)
+                                    }
                                 }
                             },
                             modifier = Modifier.testTag("schedule_toggle"),
@@ -332,6 +528,35 @@ fun SettingsScreen(
                                 text = "SpO₂ (Blood Oxygen Saturation)",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        // Last Run info
+                        Text(
+                            text = "Last Scheduled Run",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val lastRunTime = if (repo.lastScheduleRunTimestamp > 0) {
+                            SimpleDateFormat("MMM d, HH:mm:ss", Locale.getDefault()).format(Date(repo.lastScheduleRunTimestamp))
+                        } else {
+                            "Never run yet"
+                        }
+                        Text(
+                            text = "Time: $lastRunTime",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (repo.lastScheduleRunResult != null) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Result: ${repo.lastScheduleRunResult}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (repo.lastScheduleRunResult?.contains("Error") == true || repo.lastScheduleRunResult?.contains("skipped") == true) RosePulse else NeonEmerald
                             )
                         }
                     }

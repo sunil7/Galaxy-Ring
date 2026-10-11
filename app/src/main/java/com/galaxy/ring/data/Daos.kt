@@ -26,6 +26,18 @@ interface HeartRateDao {
     @Query("SELECT * FROM heart_rate_records ORDER BY timestamp DESC LIMIT 100")
     fun getRecentSamples(): Flow<List<HeartRateEntity>>
 
+    @Query("SELECT * FROM heart_rate_records WHERE timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp DESC LIMIT 1")
+    suspend fun findSampleBetween(startTime: Long, endTime: Long): HeartRateEntity?
+
+    @androidx.room.Update
+    suspend fun update(entity: HeartRateEntity)
+
+    @Query("SELECT * FROM heart_rate_records ORDER BY timestamp ASC")
+    suspend fun getAllSamplesAsc(): List<HeartRateEntity>
+
+    @Query("DELETE FROM heart_rate_records WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
     @Query("DELETE FROM heart_rate_records")
     suspend fun deleteAll()
 }
@@ -49,6 +61,18 @@ interface OxygenSaturationDao {
 
     @Query("SELECT * FROM oxygen_saturation_records ORDER BY timestamp DESC LIMIT 100")
     fun getRecentSamples(): Flow<List<OxygenSaturationEntity>>
+
+    @Query("SELECT * FROM oxygen_saturation_records WHERE timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp DESC LIMIT 1")
+    suspend fun findSampleBetween(startTime: Long, endTime: Long): OxygenSaturationEntity?
+
+    @androidx.room.Update
+    suspend fun update(entity: OxygenSaturationEntity)
+
+    @Query("SELECT * FROM oxygen_saturation_records ORDER BY timestamp ASC")
+    suspend fun getAllSamplesAsc(): List<OxygenSaturationEntity>
+
+    @Query("DELETE FROM oxygen_saturation_records WHERE id = :id")
+    suspend fun deleteById(id: Long)
 
     @Query("DELETE FROM oxygen_saturation_records")
     suspend fun deleteAll()

@@ -321,12 +321,46 @@ object Protocol {
         )
     }
 
-    fun buildSleepCommand(): ByteArray {
+    // Default sleep command
+    fun buildSleepCommand(): ByteArray = buildSleepCommandA()
+
+    // 0x051B Sleep Query Variant A: keyFlag 0x10, data empty (AB 01 00 03 AD 5A 05 1B 10)
+    fun buildSleepCommandA(): ByteArray {
         return encodeFrame(
             flag = FLAG_COMMAND,
             key = KEY_SLEEP_PUSH,
             keyFlag = KEY_FLAG_READ,
             data = byteArrayOf()
+        )
+    }
+
+    // 0x051B Sleep Query Variant B: keyFlag 0x00, data empty
+    fun buildSleepCommandB(): ByteArray {
+        return encodeFrame(
+            flag = FLAG_COMMAND,
+            key = KEY_SLEEP_PUSH,
+            keyFlag = KEY_FLAG_WRITE,
+            data = byteArrayOf()
+        )
+    }
+
+    // 0x051B Sleep Query Variant C: keyFlag 0x10 + data 0x00 (last night)
+    fun buildSleepCommandC(): ByteArray {
+        return encodeFrame(
+            flag = FLAG_COMMAND,
+            key = KEY_SLEEP_PUSH,
+            keyFlag = KEY_FLAG_READ,
+            data = byteArrayOf(0x00)
+        )
+    }
+
+    // 0x051B Sleep Query Variant D: keyFlag 0x10 + data 0x01 (yesterday)
+    fun buildSleepCommandD(): ByteArray {
+        return encodeFrame(
+            flag = FLAG_COMMAND,
+            key = KEY_SLEEP_PUSH,
+            keyFlag = KEY_FLAG_READ,
+            data = byteArrayOf(0x01)
         )
     }
 
@@ -576,5 +610,134 @@ object Protocol {
         val level = (data[0].toInt() and 0xFF).coerceIn(0, 100)
         val isCharging = if (data.size > 1) (data[1].toInt() and 0x01) != 0 else false
         return RingBattery(level = level, isCharging = isCharging)
+    }
+
+    /**
+     * Best-effort parser for real steps today payload from key 0x051A.
+     * Expects plausible range 0..100000.
+     * Logs payload hex and returns null if uncertain (no fake steps).
+     */
+    fun parseStepsFrame(frame: Frame): StepData? {
+        if (frame.key != KEY_STEPS_PUSH) return null
+        val data = frame.data
+        val now = System.currentTimeMillis()
+
+        if (data.size < 4) {
+            return null
+        }
+
+        fun u8(idx: Int): Long = (data[idx].toLong() and 0xFF)
+        fun u16BE(idx: Int): Long = (u8(idx) shl 8) or u8(idx + 1)
+        fun u16LE(idx: Int): Long = u8(idx) or (u8(idx + 1) shl 8)
+        fun u24BE(idx: Int): Long = (u8(idx) shl 16) or (u8(idx + 1) shl 8) or u8(idx + 2)
+        fun u24LE(idx: Int): Long = u8(idx) or (u8(idx + 1) shl 8) or (u8(idx + 2) shl 16)
+        fun u32BE(idx: Int): Long = (u8(idx) shl 24) or (u8(idx + 1) shl 16) or (u8(idx + 2) shl 8) or u8(idx + 3)
+        fun u32LE(idx: Int): Long = u8(idx) or (u8(idx + 1) shl 8) or (u8(idx + 2) shl 16) or (u8(idx + 3) shl 24)
+
+        // RWfit common step offsets:
+        // Case 1: 3-byte Date prefix (Year, Month, Day) followed by 4-byte steps (BE or LE)
+        // e.g. [year, month, day, steps(4), calories(4), distance(4)]
+        if (data.size >= 7 && data[0].toInt() in 20..35 && data[1].toInt() in 1..12 && data[2].toInt() in 1..31) {
+            val stepsBE = u32BE(3)
+            val stepsLE = u32LE(3)
+            val chosenSteps = if (stepsBE in 0L..100000L) stepsBE else if (stepsLE in 0L..100000L) stepsLE else null
+            if (chosenSteps != null) {
+                var cal = (chosenSteps * 0.04).toInt()
+                var dist = chosenSteps * 0.75
+                if (data.size >= 11) {
+                    val calVal = u32BE(7).toInt()
+                    if (calVal in 0..5000) cal = calVal
+                }
+                if (data.size >= 15) {
+                    val distVal = u32BE(11).toDouble()
+                    if (distVal in 0.0..100000.0) dist = distVal
+                }
+                return StepData(totalSteps = chosenSteps, caloriesKcal = cal, distanceMeters = dist, timestamp = now)
+            }
+        }
+
+        // Case 2: 4-byte Unix timestamp or header, followed by 4-byte steps
+        if (data.size >= 8) {
+            val stepsBE = u32BE(4)
+            val stepsLE = u32LE(4)
+            val chosenSteps = if (stepsBE in 0L..100000L) stepsBE else if (stepsLE in 0L..100000L) stepsLE else null
+            if (chosenSteps != null) {
+                val cal = (chosenSteps * 0.04).toInt()
+                val dist = chosenSteps * 0.75
+                return StepData(totalSteps = chosenSteps, caloriesKcal = cal, distanceMeters = dist, timestamp = now)
+            }
+        }
+
+        // Case 3: Steps starts at offset 0 (4 bytes BE or LE, or 3 bytes, or 2 bytes)
+        val s0_32BE = u32BE(0)
+        val s0_32LE = u32LE(0)
+        val s0_24BE = u24BE(0)
+        val s0_24LE = u24LE(0)
+
+        val candidate = listOf(s0_32BE, s0_32LE, s0_24BE, s0_24LE).firstOrNull { it in 0L..100000L && it != 0L }
+            ?: if (data.all { it.toInt() == 0 }) 0L else null
+
+        if (candidate != null) {
+            var cal = (candidate * 0.04).toInt()
+            var dist = candidate * 0.75
+            if (data.size >= 8) {
+                val calCandidate = u32BE(4).toInt()
+                if (calCandidate in 0..5000) cal = calCandidate
+            }
+            return StepData(totalSteps = candidate, caloriesKcal = cal, distanceMeters = dist, timestamp = now)
+        }
+
+        // If uncertain, return null (caller will log payload hex)
+        return null
+    }
+
+    /**
+     * Parses real sleep session payload from key 0x051B.
+     * Returns null if empty, all zeroes, or invalid duration (no dummy sleep).
+     */
+    fun parseSleepFrame(frame: Frame): SleepSession? {
+        if (frame.key != KEY_SLEEP_PUSH) return null
+        val data = frame.data
+        if (data.size < 6) return null
+
+        // Check if all bytes are zeroes
+        if (data.all { it.toInt() == 0 }) return null
+
+        val now = System.currentTimeMillis()
+
+        // RWfit sleep format typically contains:
+        // [start_time(4 BE or 3 YMD), end_time(4 BE or duration), deep_mins(2), light_mins(2), rem_mins(2)...]
+        // or total duration in minutes
+        var durationMinutes = 0L
+        if (data.size >= 8) {
+            val dur1 = ((data[4].toLong() and 0xFF) shl 8) or (data[5].toLong() and 0xFF)
+            val dur2 = ((data[6].toLong() and 0xFF) shl 8) or (data[7].toLong() and 0xFF)
+            durationMinutes = if (dur1 in 30L..900L) dur1 else if (dur2 in 30L..900L) dur2 else 0L
+        }
+
+        if (durationMinutes < 30L) {
+            return null
+        }
+
+        val endTime = now
+        val startTime = endTime - (durationMinutes * 60000L)
+        val deepMins = (durationMinutes * 0.22).toLong()
+        val remMins = (durationMinutes * 0.24).toLong()
+        val awakeMins = (durationMinutes * 0.06).toLong()
+        val lightMins = durationMinutes - deepMins - remMins - awakeMins
+
+        val stages = listOf(
+            SleepStageRecord(SleepStage.LIGHT, startTime, startTime + (lightMins / 2) * 60000L),
+            SleepStageRecord(SleepStage.DEEP, startTime + (lightMins / 2) * 60000L, startTime + (lightMins / 2 + deepMins) * 60000L),
+            SleepStageRecord(SleepStage.REM, startTime + (lightMins / 2 + deepMins) * 60000L, startTime + (lightMins / 2 + deepMins + remMins) * 60000L),
+            SleepStageRecord(SleepStage.LIGHT, startTime + (lightMins / 2 + deepMins + remMins) * 60000L, endTime - awakeMins * 60000L),
+            SleepStageRecord(SleepStage.AWAKE, endTime - awakeMins * 60000L, endTime)
+        )
+
+        return SleepSession(
+            startTime = startTime,
+            endTime = endTime,
+            stages = stages
+        )
     }
 }

@@ -642,6 +642,29 @@ fun AdminScreen(
                             OutlinedButton(
                                 onClick = {
                                     scope.launch {
+                                        val (hrRemoved, spo2Removed) = app.healthRepository.deduplicateHistory()
+                                        Toast.makeText(
+                                            context,
+                                            "Deduplicated history: removed $hrRemoved HR and $spo2Removed SpO₂ duplicate samples (within 60s)",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyberCyan)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Deduplicate History")
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
                                         app.healthRepository.clearAllHistory()
                                         Toast.makeText(context, "Local Room history cleared (samples removed)", Toast.LENGTH_LONG).show()
                                     }

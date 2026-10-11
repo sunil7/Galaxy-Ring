@@ -81,6 +81,16 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         checkHealthPermissions()
         GalaxyRingApp.instance.bleRepository.hasBlePermissions()
+        GalaxyRingApp.instance.bleRepository.onAppForegrounded()
+        val repo = GalaxyRingApp.instance.healthRepository
+        if (repo.isKeepConnected || repo.isScheduleEnabled) {
+            RingScheduledService.start(this)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        GalaxyRingApp.instance.bleRepository.onAppBackgrounded()
     }
 
     private fun checkHealthPermissions() {

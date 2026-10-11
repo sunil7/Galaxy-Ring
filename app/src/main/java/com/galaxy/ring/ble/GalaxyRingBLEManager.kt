@@ -435,6 +435,16 @@ class GalaxyRingBLEManager(
                     handleBiometricFrame(frame)
                 }
 
+                // 1b. Parse Steps (Key 0x051A)
+                if (frame.key == Protocol.KEY_STEPS_PUSH) {
+                    handleStepsFrame(frame)
+                }
+
+                // 1c. Parse Sleep (Key 0x051B)
+                if (frame.key == Protocol.KEY_SLEEP_PUSH) {
+                    handleSleepFrame(frame)
+                }
+
                 // 2. Status updates (Key 0x0609 measurement completed: payload ends with type, 0x05, 0x00)
                 if (frame.key == Protocol.KEY_MEASURE_CONTROL) {
                     val completedType = Protocol.getCompletedMeasurementType(frame)
@@ -499,6 +509,42 @@ class GalaxyRingBLEManager(
                 }
             } catch (e: Exception) {
                 AppLog.e(tag, "Error handling biometric frame: ${e.message}", e)
+            }
+        }
+    }
+
+    private fun handleStepsFrame(frame: Protocol.Frame) {
+        scope.launch {
+            try {
+                val hex = frame.fullPayload.joinToString(" ") { "%02X".format(it) }
+                AppLog.i(tag, "0x051A Steps RX: $hex")
+                val steps = Protocol.parseStepsFrame(frame)
+                if (steps != null) {
+                    AppLog.i(tag, "Steps successfully parsed from 051A: ${steps.totalSteps} steps")
+                    _stepsFlow.emit(steps)
+                } else {
+                    AppLog.w(tag, "0x051A: uncertain step data payload, leaving raw steps unparsed: $hex")
+                }
+            } catch (e: Exception) {
+                AppLog.e(tag, "Error handling steps frame: ${e.message}", e)
+            }
+        }
+    }
+
+    private fun handleSleepFrame(frame: Protocol.Frame) {
+        scope.launch {
+            try {
+                val hex = frame.fullPayload.joinToString(" ") { "%02X".format(it) }
+                AppLog.i(tag, "0x051B Sleep RX: $hex")
+                val sleep = Protocol.parseSleepFrame(frame)
+                if (sleep != null) {
+                    AppLog.i(tag, "Sleep successfully parsed from 051B: ${sleep.durationMinutes} mins")
+                    _sleepFlow.emit(sleep)
+                } else {
+                    AppLog.i(tag, "0x051B: payload received but duration 0 or empty, leaving sleep record empty")
+                }
+            } catch (e: Exception) {
+                AppLog.e(tag, "Error handling sleep frame: ${e.message}", e)
             }
         }
     }
@@ -773,5 +819,77 @@ class GalaxyRingBLEManager(
         val frame = Protocol.buildSpO2StopCommand()
         val reply = executeCommand(gatt, frame, Protocol.KEY_MEASURE_CONTROL, timeoutMs = 5000L)
         return reply != null
+    }
+
+    // =========================================================================
+    // 6. Steps & Sleep Queries (0x051A and 0x051B)
+    // =========================================================================
+
+    /**
+     * Sends working TX: AB 01 00 03 AD 1A 05 1A 10 and parses real steps.
+     */
+    suspend fun fetchSteps(gatt: BluetoothGatt): com.galaxy.ring.data.StepData? {
+        val frame = Protocol.buildStepsCommand()
+        val txHex = frame.joinToString(" ") { "%02X".format(it) }
+        AppLog.i(tag, "TX -> 0x051A Steps Query: $txHex")
+        val reply = executeCommand(gatt, frame, Protocol.KEY_STEPS_PUSH, timeoutMs = 5000L)
+        return if (reply != null) {
+            val hex = reply.fullPayload.joinToString(" ") { "%02X".format(it) }
+            AppLog.i(tag, "0x051A Steps reply received: $hex")
+            val steps = Protocol.parseStepsFrame(reply)
+            if (steps != null) {
+                AppLog.i(tag, "Real steps parsed from 051A: ${steps.totalSteps}")
+                _stepsFlow.emit(steps)
+            } else {
+                AppLog.w(tag, "0x051A Steps reply could not be parsed into plausible steps (0..100000): $hex")
+            }
+            steps
+        } else {
+            AppLog.w(tag, "0x051A Steps Query timed out (0 matching RX)")
+            null
+        }
+    }
+
+    /**
+     * Executes the strict 0x051B sleep query sequence:
+     * A) 051B keyFlag 0x10
+     * B) 051B keyFlag 0x00
+     * C) 051B keyFlag 0x10 + data 0x00 (last night)
+     * D) 051B keyFlag 0x10 + data 0x01 (yesterday)
+     * Timeout 10s, 1 retry each. First RX wins -> parse/save sleep or leave empty.
+     */
+    suspend fun syncSleepSequence(gatt: BluetoothGatt): com.galaxy.ring.data.SleepSession? {
+        AppLog.i(tag, "Starting 051B Sleep Query Sequence (A -> B -> C -> D, timeout 10s each, 1 retry)...")
+
+        val queries = listOf(
+            Triple("A (051B keyFlag=0x10 empty)", Protocol.buildSleepCommandA(), "05 1B 10"),
+            Triple("B (051B keyFlag=0x00 empty)", Protocol.buildSleepCommandB(), "05 1B 00"),
+            Triple("C (051B keyFlag=0x10 data=0x00 last night)", Protocol.buildSleepCommandC(), "05 1B 10 00"),
+            Triple("D (051B keyFlag=0x10 data=0x01 yesterday)", Protocol.buildSleepCommandD(), "05 1B 10 01")
+        )
+
+        for ((name, frame, spec) in queries) {
+            val txHex = frame.joinToString(" ") { "%02X".format(it) }
+            AppLog.i(tag, "Attempting Sleep Query $name [TX: $txHex]...")
+            val reply = executeCommand(gatt, frame, Protocol.KEY_SLEEP_PUSH, timeoutMs = 10000L, maxRetries = 1)
+            if (reply != null) {
+                val rxHex = reply.fullPayload.joinToString(" ") { "%02X".format(it) }
+                AppLog.i(tag, "Sleep Query $name SUCCEEDED! RX received from ring: $rxHex")
+                val sleep = Protocol.parseSleepFrame(reply)
+                if (sleep != null) {
+                    AppLog.i(tag, "Sleep session successfully parsed from $name: ${sleep.durationMinutes} mins")
+                    _sleepFlow.emit(sleep)
+                    return sleep
+                } else {
+                    AppLog.i(tag, "Sleep Query $name returned payload with 0/empty sleep duration; no dummy sleep recorded.")
+                    return null
+                }
+            } else {
+                AppLog.w(tag, "Sleep Query $name timed out (0 RX).")
+            }
+        }
+
+        AppLog.i(tag, "Sleep Query A-D complete: 0 RX received for 051B. Sleep left empty without dummy data.")
+        return null
     }
 }

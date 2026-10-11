@@ -116,41 +116,61 @@ class BleRepository(
         return scanOk && connectOk
     }
 
+    private val bondReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, intent: android.content.Intent) {
+            if (intent.action == BluetoothDevice.ACTION_BOND_STATE_CHANGED) {
+                val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                }
+                val bondState = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.BOND_NONE)
+                val prevBondState = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.BOND_NONE)
+                val stateName = when (bondState) {
+                    BluetoothDevice.BOND_BONDED -> "BONDED"
+                    BluetoothDevice.BOND_BONDING -> "BONDING"
+                    BluetoothDevice.BOND_NONE -> "BOND_NONE"
+                    else -> "BOND_$bondState"
+                }
+                AppLog.i(tagBle, "Bluetooth bond state changed for ${device?.address}: $stateName (prev=$prevBondState)")
+            }
+        }
+    }
+
     init {
+        try {
+            val filter = android.content.IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+            context.registerReceiver(bondReceiver, filter)
+        } catch (e: Exception) {
+            AppLog.e(tagBle, "Failed to register bondReceiver: ${e.message}")
+        }
         // Observe decoded biometric data from GalaxyRingBLEManager
         observeBLEManagerData()
     }
 
     private fun observeBLEManagerData() {
-        // 1. Observe Heart Rate
+        // 1. Observe Heart Rate (in-memory streaming only for live UI; single final row saved on completion)
         scope.launch {
             bleManager.heartRateFlow.collect { hr ->
-                AppLog.i(tagSync, "Heart Rate received from BLEManager: ${hr.bpm} BPM")
+                AppLog.i(tagSync, "Heart Rate live sample from 0224: ${hr.bpm} BPM")
                 val updatedHistory = _snapshot.value.heartRateHistory.toMutableList().apply {
                     add(hr)
                     if (size > 25) removeAt(0)
                 }
                 _snapshot.value = _snapshot.value.copy(latestHeartRate = hr, heartRateHistory = updatedHistory)
-
-                val measuringHR = (_manualMeasurementState.value as? ManualMeasurementState.Measuring)?.metric == "Heart Rate"
-                healthRepository.saveHeartRate(bpm = hr.bpm, timestamp = hr.timestamp, isManual = measuringHR)
-                healthWriter.writeHeartRateSample(hr, isManual = measuringHR)
             }
         }
 
-        // 2. Observe SpO₂
+        // 2. Observe SpO₂ (in-memory streaming only for live UI; single final row saved on completion)
         scope.launch {
             bleManager.spo2Flow.collect { spo2 ->
-                AppLog.i(tagSync, "SpO₂ received from BLEManager: ${spo2.percentage}%")
+                AppLog.i(tagSync, "SpO₂ live sample from 024E: ${spo2.percentage}%")
                 val updatedHistory = _snapshot.value.oxygenSaturationHistory.toMutableList().apply {
                     add(spo2)
                     if (size > 25) removeAt(0)
                 }
                 _snapshot.value = _snapshot.value.copy(latestOxygenSaturation = spo2, oxygenSaturationHistory = updatedHistory)
-
-                val measuringSpo2 = (_manualMeasurementState.value as? ManualMeasurementState.Measuring)?.metric == "SpO₂"
-                healthRepository.saveOxygenSaturation(percentage = spo2.percentage, timestamp = spo2.timestamp, isManual = measuringSpo2)
-                healthWriter.writeOxygenSaturationSample(spo2, isManual = measuringSpo2)
             }
         }
 
@@ -397,6 +417,22 @@ class BleRepository(
                 // Only set Ready if real RX was received during init!
                 _connectionState.value = ConnectionState.Ready(device, rxTotal)
                 AppLog.i(tagBle, "SR16 Ring marked READY. Total RX frames since connect: $rxTotal")
+
+                // B2: Optional Bluetooth bonding after successful initialization
+                if (healthRepository.isBondingEnabled) {
+                    try {
+                        val btDevice = gatt.device
+                        if (btDevice != null && btDevice.bondState == BluetoothDevice.BOND_NONE) {
+                            AppLog.i(tagBle, "Bonding enabled in settings and ring ${btDevice.address} is not bonded. Calling createBond()...")
+                            val bondStarted = btDevice.createBond()
+                            AppLog.i(tagBle, "createBond() result for ${btDevice.address}: $bondStarted")
+                        } else if (btDevice != null && btDevice.bondState == BluetoothDevice.BOND_BONDED) {
+                            AppLog.i(tagBle, "Ring ${btDevice.address} is already BONDED.")
+                        }
+                    } catch (e: Exception) {
+                        AppLog.e(tagBle, "Error checking/triggering bonding: ${e.message}", e)
+                    }
+                }
             } catch (e: Exception) {
                 AppLog.e(tagBle, "Exception during startPostConnectionFlow: ${e.message}", e)
                 _connectionState.value = ConnectionState.Error("Post-connect failed: ${e.message ?: "Unknown error"}")
@@ -433,217 +469,327 @@ class BleRepository(
     }
 
     fun measureHeartRate() {
+        scope.launch {
+            executeHeartRateMeasurement(isManual = true)
+        }
+    }
+
+    suspend fun executeHeartRateMeasurement(isManual: Boolean): HeartRateSample? {
         val prereqError = validateMeasurementPrerequisites("Heart Rate")
         if (prereqError != null) {
             AppLog.e(tagBle, "Measure Heart Rate rejected: $prereqError")
             AppLog.lastMeasureResult = "Heart Rate: Error - $prereqError"
-            _manualMeasurementState.value = ManualMeasurementState.Error(
-                metric = "Heart Rate",
-                message = prereqError
-            )
-            return
+            if (isManual) {
+                _manualMeasurementState.value = ManualMeasurementState.Error(
+                    metric = "Heart Rate",
+                    message = prereqError
+                )
+            }
+            return null
         }
 
-        val gatt = currentGatt ?: return
-        scope.launch {
-            try {
+        val gatt = currentGatt ?: return null
+        return try {
+            if (isManual) {
                 _manualMeasurementState.value = ManualMeasurementState.Measuring("Heart Rate", progress = 0.05f)
-                val startTime = System.currentTimeMillis()
-                AppLog.i(tagBle, "Measure Heart Rate START (0609 type=0x03)")
+            }
+            val startTime = System.currentTimeMillis()
+            AppLog.i(tagBle, "Measure Heart Rate START (0609 type=0x03, isManual=$isManual)")
 
-                val startOk = bleManager.startHeartRateMeasurement(gatt)
-                if (!startOk) {
-                    val writeErr = "Ring rejected Heart Rate start command (0609)."
-                    AppLog.e(tagBle, "Measure Heart Rate write error: $writeErr")
-                    AppLog.lastMeasureResult = "Heart Rate: Error - $writeErr"
+            val startOk = bleManager.startHeartRateMeasurement(gatt)
+            if (!startOk) {
+                val writeErr = "Ring rejected Heart Rate start command (0609)."
+                AppLog.e(tagBle, "Measure Heart Rate write error: $writeErr")
+                AppLog.lastMeasureResult = "Heart Rate: Error - $writeErr"
+                if (isManual) {
                     _manualMeasurementState.value = ManualMeasurementState.Error(
                         metric = "Heart Rate",
                         message = writeErr
                     )
-                    return@launch
                 }
+                return null
+            }
 
-                // Wait up to ~60s or until reading arrives
-                val maxWaitMs = 60000L
-                val pollStepMs = 500L
-                val totalSteps = (maxWaitMs / pollStepMs).toInt()
-                var latestNonzeroHr: HeartRateSample? = null
+            // Wait up to ~60s or until reading arrives
+            val maxWaitMs = 60000L
+            val pollStepMs = 500L
+            val totalSteps = (maxWaitMs / pollStepMs).toInt()
+            var latestNonzeroHr: HeartRateSample? = null
 
-                var statusCompleteReceived = false
-                val completionJob = launch {
-                    bleManager.measureCompletedFlow.collect { type ->
-                        if (type == Protocol.MEASURE_TYPE_HR || type == 0x00.toByte()) {
-                            statusCompleteReceived = true
-                        }
+            var statusCompleteReceived = false
+            val completionJob = scope.launch {
+                bleManager.measureCompletedFlow.collect { type ->
+                    if (type == Protocol.MEASURE_TYPE_HR || type == 0x00.toByte()) {
+                        statusCompleteReceived = true
                     }
                 }
+            }
 
-                for (step in 1..totalSteps) {
-                    delay(pollStepMs)
-                    val current = _snapshot.value.latestHeartRate
-                    if (current != null && current.timestamp >= startTime && current.bpm in 30..220) {
-                        latestNonzeroHr = current
-                    }
-                    if (statusCompleteReceived || !bleManager.isMeasuringActive) {
-                        AppLog.i(tagBle, "Heart Rate measurement finished by ring 0609 status complete")
-                        break
-                    }
+            for (step in 1..totalSteps) {
+                delay(pollStepMs)
+                val current = _snapshot.value.latestHeartRate
+                if (current != null && current.timestamp >= startTime && current.bpm in 30..220) {
+                    latestNonzeroHr = current
+                }
+                if (statusCompleteReceived || !bleManager.isMeasuringActive) {
+                    AppLog.i(tagBle, "Heart Rate measurement finished by ring 0609 status complete")
+                    break
+                }
+                if (isManual) {
                     val progress = (step.toFloat() / totalSteps.toFloat()).coerceIn(0.05f, 0.95f)
                     if (_manualMeasurementState.value is ManualMeasurementState.Measuring) {
                         _manualMeasurementState.value = ManualMeasurementState.Measuring("Heart Rate", progress = progress)
                     }
                 }
+            }
 
-                completionJob.cancel()
+            completionJob.cancel()
 
-                // Always send stop 0609 when finishing
-                try {
-                    bleManager.stopHeartRateMeasurement(gatt)
-                } catch (e: Exception) {
-                    AppLog.w(tagBle, "Error stopping Heart Rate measurement: ${e.message}")
-                }
+            // Always send stop 0609 when finishing
+            try {
+                bleManager.stopHeartRateMeasurement(gatt)
+            } catch (e: Exception) {
+                AppLog.w(tagBle, "Error stopping Heart Rate measurement: ${e.message}")
+            }
 
-                // Final check on latest reading
-                val finalCurrent = _snapshot.value.latestHeartRate
-                if (finalCurrent != null && finalCurrent.timestamp >= startTime && finalCurrent.bpm in 30..220) {
-                    latestNonzeroHr = finalCurrent
-                }
+            // Final check on latest reading
+            val finalCurrent = _snapshot.value.latestHeartRate
+            if (finalCurrent != null && finalCurrent.timestamp >= startTime && finalCurrent.bpm in 30..220) {
+                latestNonzeroHr = finalCurrent
+            }
 
-                if (latestNonzeroHr != null) {
-                    healthRepository.saveHeartRate(bpm = latestNonzeroHr.bpm, timestamp = latestNonzeroHr.timestamp, isManual = true)
-                    healthWriter.writeHeartRateSample(latestNonzeroHr, isManual = true)
-                    val displayStr = "${latestNonzeroHr.bpm} BPM"
+            if (latestNonzeroHr != null) {
+                // Save single final sample to Room and Health Connect
+                healthRepository.saveHeartRate(bpm = latestNonzeroHr.bpm, timestamp = latestNonzeroHr.timestamp, isManual = isManual)
+                healthWriter.writeHeartRateSample(latestNonzeroHr, isManual = isManual)
+                val displayStr = "${latestNonzeroHr.bpm} BPM"
+                if (isManual) {
                     _manualMeasurementState.value = ManualMeasurementState.Success(
                         metric = "Heart Rate",
                         displayValue = displayStr,
                         timestamp = latestNonzeroHr.timestamp
                     )
-                    AppLog.lastMeasureResult = "Heart Rate: $displayStr (Success)"
-                    AppLog.i(tagBle, "Manual Heart Rate measurement succeeded: $displayStr")
-                } else {
-                    val errMsg = "sensor ran but value stayed 0"
-                    AppLog.w(tagBle, "Manual Heart Rate measurement ended without nonzero sample: $errMsg")
-                    AppLog.lastMeasureResult = "Heart Rate: Error - $errMsg"
+                }
+                AppLog.lastMeasureResult = "Heart Rate: $displayStr (Success, isManual=$isManual)"
+                AppLog.i(tagBle, "Heart Rate measurement succeeded: $displayStr (isManual=$isManual, single row saved)")
+                latestNonzeroHr
+            } else {
+                val errMsg = "sensor ran but value stayed 0"
+                AppLog.w(tagBle, "Heart Rate measurement ended without nonzero sample: $errMsg")
+                AppLog.lastMeasureResult = "Heart Rate: Error - $errMsg"
+                if (isManual) {
                     _manualMeasurementState.value = ManualMeasurementState.Error(
                         metric = "Heart Rate",
                         message = errMsg
                     )
                 }
-            } catch (e: Exception) {
-                AppLog.e(tagBle, "Exception in measureHeartRate: ${e.message}", e)
+                null
+            }
+        } catch (e: Exception) {
+            AppLog.e(tagBle, "Exception in executeHeartRateMeasurement: ${e.message}", e)
+            if (isManual) {
                 _manualMeasurementState.value = ManualMeasurementState.Error(
                     metric = "Heart Rate",
                     message = "Error: ${e.message ?: "Measurement failed"}"
                 )
             }
+            null
         }
     }
 
     fun measureOxygenSaturation() {
+        scope.launch {
+            executeOxygenSaturationMeasurement(isManual = true)
+        }
+    }
+
+    suspend fun executeOxygenSaturationMeasurement(isManual: Boolean): OxygenSaturationSample? {
         val prereqError = validateMeasurementPrerequisites("SpO₂")
         if (prereqError != null) {
             AppLog.e(tagBle, "Measure SpO₂ rejected: $prereqError")
             AppLog.lastMeasureResult = "SpO₂: Error - $prereqError"
-            _manualMeasurementState.value = ManualMeasurementState.Error(
-                metric = "SpO₂",
-                message = prereqError
-            )
-            return
+            if (isManual) {
+                _manualMeasurementState.value = ManualMeasurementState.Error(
+                    metric = "SpO₂",
+                    message = prereqError
+                )
+            }
+            return null
         }
 
-        val gatt = currentGatt ?: return
-        scope.launch {
-            try {
+        val gatt = currentGatt ?: return null
+        return try {
+            if (isManual) {
                 _manualMeasurementState.value = ManualMeasurementState.Measuring("SpO₂", progress = 0.05f)
-                val startTime = System.currentTimeMillis()
-                AppLog.i(tagBle, "Measure SpO₂ START (0609 type=0x09)")
+            }
+            val startTime = System.currentTimeMillis()
+            AppLog.i(tagBle, "Measure SpO₂ START (0609 type=0x09, isManual=$isManual)")
 
-                val startOk = bleManager.startSpO2Measurement(gatt)
-                if (!startOk) {
-                    val writeErr = "Ring rejected SpO₂ start command (0609)."
-                    AppLog.e(tagBle, "Measure SpO₂ write error: $writeErr")
-                    AppLog.lastMeasureResult = "SpO₂: Error - $writeErr"
+            val startOk = bleManager.startSpO2Measurement(gatt)
+            if (!startOk) {
+                val writeErr = "Ring rejected SpO₂ start command (0609)."
+                AppLog.e(tagBle, "Measure SpO₂ write error: $writeErr")
+                AppLog.lastMeasureResult = "SpO₂: Error - $writeErr"
+                if (isManual) {
                     _manualMeasurementState.value = ManualMeasurementState.Error(
                         metric = "SpO₂",
                         message = writeErr
                     )
-                    return@launch
                 }
+                return null
+            }
 
-                // Wait up to ~60s or until reading arrives
-                val maxWaitMs = 60000L
-                val pollStepMs = 500L
-                val totalSteps = (maxWaitMs / pollStepMs).toInt()
-                var latestNonzeroSpo2: OxygenSaturationSample? = null
+            // Wait up to ~60s or until reading arrives
+            val maxWaitMs = 60000L
+            val pollStepMs = 500L
+            val totalSteps = (maxWaitMs / pollStepMs).toInt()
+            var latestNonzeroSpo2: OxygenSaturationSample? = null
 
-                var statusCompleteReceived = false
-                val completionJob = launch {
-                    bleManager.measureCompletedFlow.collect { type ->
-                        if (type == Protocol.MEASURE_TYPE_SPO2 || type == 0x00.toByte()) {
-                            statusCompleteReceived = true
-                        }
+            var statusCompleteReceived = false
+            val completionJob = scope.launch {
+                bleManager.measureCompletedFlow.collect { type ->
+                    if (type == Protocol.MEASURE_TYPE_SPO2 || type == 0x00.toByte()) {
+                        statusCompleteReceived = true
                     }
                 }
+            }
 
-                for (step in 1..totalSteps) {
-                    delay(pollStepMs)
-                    val current = _snapshot.value.latestOxygenSaturation
-                    if (current != null && current.timestamp >= startTime && current.percentage in 70f..100f) {
-                        latestNonzeroSpo2 = current
-                    }
-                    if (statusCompleteReceived || !bleManager.isMeasuringActive) {
-                        AppLog.i(tagBle, "SpO2 measurement finished by ring 0609 status complete")
-                        break
-                    }
+            for (step in 1..totalSteps) {
+                delay(pollStepMs)
+                val current = _snapshot.value.latestOxygenSaturation
+                if (current != null && current.timestamp >= startTime && current.percentage in 70f..100f) {
+                    latestNonzeroSpo2 = current
+                }
+                if (statusCompleteReceived || !bleManager.isMeasuringActive) {
+                    AppLog.i(tagBle, "SpO2 measurement finished by ring 0609 status complete")
+                    break
+                }
+                if (isManual) {
                     val progress = (step.toFloat() / totalSteps.toFloat()).coerceIn(0.05f, 0.95f)
                     if (_manualMeasurementState.value is ManualMeasurementState.Measuring) {
                         _manualMeasurementState.value = ManualMeasurementState.Measuring("SpO₂", progress = progress)
                     }
                 }
+            }
 
-                completionJob.cancel()
+            completionJob.cancel()
 
-                // Always send stop 0609 when finishing
-                try {
-                    bleManager.stopSpO2Measurement(gatt)
-                } catch (e: Exception) {
-                    AppLog.w(tagBle, "Error stopping SpO2 measurement: ${e.message}")
-                }
+            // Always send stop 0609 when finishing
+            try {
+                bleManager.stopSpO2Measurement(gatt)
+            } catch (e: Exception) {
+                AppLog.w(tagBle, "Error stopping SpO2 measurement: ${e.message}")
+            }
 
-                // Final check on latest reading
-                val finalCurrent = _snapshot.value.latestOxygenSaturation
-                if (finalCurrent != null && finalCurrent.timestamp >= startTime && finalCurrent.percentage in 70f..100f) {
-                    latestNonzeroSpo2 = finalCurrent
-                }
+            // Final check on latest reading
+            val finalCurrent = _snapshot.value.latestOxygenSaturation
+            if (finalCurrent != null && finalCurrent.timestamp >= startTime && finalCurrent.percentage in 70f..100f) {
+                latestNonzeroSpo2 = finalCurrent
+            }
 
-                if (latestNonzeroSpo2 != null) {
-                    healthRepository.saveOxygenSaturation(percentage = latestNonzeroSpo2.percentage, timestamp = latestNonzeroSpo2.timestamp, isManual = true)
-                    healthWriter.writeOxygenSaturationSample(latestNonzeroSpo2, isManual = true)
-                    val displayStr = "${latestNonzeroSpo2.percentage.toInt()}%"
+            if (latestNonzeroSpo2 != null) {
+                // Save single final sample to Room and Health Connect
+                healthRepository.saveOxygenSaturation(percentage = latestNonzeroSpo2.percentage, timestamp = latestNonzeroSpo2.timestamp, isManual = isManual)
+                healthWriter.writeOxygenSaturationSample(latestNonzeroSpo2, isManual = isManual)
+                val displayStr = "${latestNonzeroSpo2.percentage.toInt()}%"
+                if (isManual) {
                     _manualMeasurementState.value = ManualMeasurementState.Success(
                         metric = "SpO₂",
                         displayValue = displayStr,
                         timestamp = latestNonzeroSpo2.timestamp
                     )
-                    AppLog.lastMeasureResult = "SpO₂: $displayStr (Success)"
-                    AppLog.i(tagBle, "Manual SpO₂ measurement succeeded: $displayStr")
-                } else {
-                    val errMsg = "sensor ran but value stayed 0"
-                    AppLog.w(tagBle, "Manual SpO₂ measurement ended without nonzero sample: $errMsg")
-                    AppLog.lastMeasureResult = "SpO₂: Error - $errMsg"
+                }
+                AppLog.lastMeasureResult = "SpO₂: $displayStr (Success, isManual=$isManual)"
+                AppLog.i(tagBle, "SpO₂ measurement succeeded: $displayStr (isManual=$isManual, single row saved)")
+                latestNonzeroSpo2
+            } else {
+                val errMsg = "sensor ran but value stayed 0"
+                AppLog.w(tagBle, "SpO₂ measurement ended without nonzero sample: $errMsg")
+                AppLog.lastMeasureResult = "SpO₂: Error - $errMsg"
+                if (isManual) {
                     _manualMeasurementState.value = ManualMeasurementState.Error(
                         metric = "SpO₂",
                         message = errMsg
                     )
                 }
-            } catch (e: Exception) {
-                AppLog.e(tagBle, "Exception in measureOxygenSaturation: ${e.message}", e)
+                null
+            }
+        } catch (e: Exception) {
+            AppLog.e(tagBle, "Exception in executeOxygenSaturationMeasurement: ${e.message}", e)
+            if (isManual) {
                 _manualMeasurementState.value = ManualMeasurementState.Error(
                     metric = "SpO₂",
                     message = "Error: ${e.message ?: "Measurement failed"}"
                 )
             }
+            null
         }
+    }
+
+    /**
+     * Executes scheduled background measurements for enabled metrics (isManual = false).
+     * Saves ONE final sample per metric per scheduled tick.
+     */
+    suspend fun performScheduledMeasurement(checkHr: Boolean, checkSpo2: Boolean): String {
+        AppLog.i(tagSync, "=== Scheduled Biometric Check Starting ===")
+        val gatt = currentGatt
+        val lastAddr = healthRepository.lastConnectedAddress
+        if (gatt == null && lastAddr != null) {
+            AppLog.i(tagSync, "Reconnecting to ring $lastAddr for scheduled check...")
+            connect(lastAddr, healthRepository.lastConnectedName ?: "Galaxy Ring")
+        }
+
+        // Wait up to 20 seconds for Ready state
+        var waitSec = 0
+        while (waitSec < 20 && _connectionState.value !is ConnectionState.Ready) {
+            delay(1000)
+            waitSec++
+        }
+
+        if (_connectionState.value !is ConnectionState.Ready) {
+            val stateName = _connectionState.value::class.simpleName ?: "Disconnected"
+            val msg = "Scheduled run skipped: Ring not Ready ($stateName after ${waitSec}s)"
+            AppLog.w(tagSync, msg)
+            healthRepository.lastScheduleRunTimestamp = System.currentTimeMillis()
+            healthRepository.lastScheduleRunResult = msg
+            return msg
+        }
+
+        val results = mutableListOf<String>()
+
+        if (checkHr) {
+            AppLog.i(tagSync, "Scheduled check: measuring Heart Rate (single final sample will be saved)...")
+            val hrSample = executeHeartRateMeasurement(isManual = false)
+            if (hrSample != null) {
+                results.add("HR: ${hrSample.bpm} BPM")
+            } else {
+                results.add("HR: No reading")
+            }
+            delay(2000)
+        }
+
+        if (checkSpo2) {
+            AppLog.i(tagSync, "Scheduled check: measuring SpO2 (single final sample will be saved)...")
+            val spo2Sample = executeOxygenSaturationMeasurement(isManual = false)
+            if (spo2Sample != null) {
+                results.add("SpO₂: ${spo2Sample.percentage.toInt()}%")
+            } else {
+                results.add("SpO₂: No reading")
+            }
+            delay(2000)
+        }
+
+        // Sync steps (051A) and sleep (051B sequence)
+        val synced = requestSync()
+        if (synced.steps.totalSteps > 0) {
+            results.add("Steps: ${synced.steps.totalSteps}")
+        }
+
+        val summary = if (results.isNotEmpty()) results.joinToString(", ") else "Completed (no readings)"
+        AppLog.i(tagSync, "=== Scheduled Biometric Check Finished: $summary ===")
+        healthRepository.lastScheduleRunTimestamp = System.currentTimeMillis()
+        healthRepository.lastScheduleRunResult = summary
+        return summary
     }
 
     fun resetManualMeasurementState() {
@@ -678,13 +824,24 @@ class BleRepository(
             AppLog.i(tagSync, "Requesting real telemetry sync from SR16 ring...")
 
             // Steps today (0x051A)
-            val stepsFrame = Protocol.buildStepsCommand()
-            bleManager.executeCommand(gatt, stepsFrame, Protocol.KEY_STEPS_PUSH, timeoutMs = 3000L)
+            val stepsData = bleManager.fetchSteps(gatt)
+            if (stepsData != null) {
+                AppLog.i(tagSync, "Steps updated from 0x051A: ${stepsData.totalSteps}")
+                _snapshot.value = _snapshot.value.copy(steps = stepsData)
+                healthRepository.saveDailySteps(steps = stepsData.totalSteps, calories = stepsData.caloriesKcal, distanceMeters = stepsData.distanceMeters)
+                healthWriter.writeSteps(stepsData)
+            }
             delay(250)
 
-            // Sleep (0x051B)
-            val sleepFrame = Protocol.buildSleepCommand()
-            bleManager.executeCommand(gatt, sleepFrame, Protocol.KEY_SLEEP_PUSH, timeoutMs = 3000L)
+            // Sleep (0x051B sequence: A -> B -> C -> D)
+            val sleepSession = bleManager.syncSleepSequence(gatt)
+            if (sleepSession != null) {
+                AppLog.i(tagSleep, "Sleep session updated from 0x051B: ${sleepSession.durationMinutes} min")
+                val analysis = SleepAnalyzer.analyze(sleepSession, (healthRepository.sleepTargetHours * 60).toLong())
+                _snapshot.value = _snapshot.value.copy(latestSleep = sleepSession, latestSleepAnalysis = analysis)
+                healthRepository.saveSleepSession(sleepSession)
+                healthWriter.writeSleepSession(sleepSession)
+            }
             delay(200)
 
             val now = System.currentTimeMillis()
@@ -705,15 +862,63 @@ class BleRepository(
         simulationJob = null
     }
 
+    private var idleDisconnectJob: Job? = null
+
+    /**
+     * Called when the app enters the foreground.
+     * Cancels any pending idle disconnect timer and auto-reconnects if keep-connected is enabled.
+     */
+    fun onAppForegrounded() {
+        idleDisconnectJob?.cancel()
+        idleDisconnectJob = null
+        AppLog.d(tagBle, "App foregrounded: cancelled idle disconnect timer")
+        val shouldKeep = healthRepository.isKeepConnected || healthRepository.isScheduleEnabled
+        if (shouldKeep && _connectionState.value is ConnectionState.Disconnected) {
+            val lastAddr = healthRepository.lastConnectedAddress
+            if (lastAddr != null) {
+                AppLog.i(tagBle, "Auto-connecting to $lastAddr on foreground...")
+                connect(lastAddr, healthRepository.lastConnectedName ?: "Galaxy Ring")
+            }
+        }
+    }
+
+    /**
+     * Called when the app leaves the foreground.
+     * If keep-connected and schedule are both OFF, starts an idle disconnect timer (2.5 min) to save ring battery.
+     */
+    fun onAppBackgrounded() {
+        val shouldKeep = healthRepository.isKeepConnected || healthRepository.isScheduleEnabled
+        if (shouldKeep) {
+            AppLog.d(tagBle, "App backgrounded: keep-connected/schedule is ON, maintaining GATT connection")
+            return
+        }
+        AppLog.i(tagBle, "App backgrounded with keep-connected and schedule OFF. Starting 2.5 min idle disconnect timer...")
+        idleDisconnectJob?.cancel()
+        idleDisconnectJob = scope.launch {
+            delay(150_000L) // 2.5 minutes
+            if (!healthRepository.isKeepConnected && !healthRepository.isScheduleEnabled && currentGatt != null) {
+                AppLog.i(tagBle, "Idle disconnect timeout reached (2.5 min). Disconnecting to conserve ring battery.")
+                disconnect()
+            }
+        }
+    }
+
     private fun scheduleAutoReconnect() {
         if (isUserDisconnect) return
+        val shouldKeep = healthRepository.isKeepConnected || healthRepository.isScheduleEnabled
+        if (!shouldKeep) {
+            AppLog.i(tagBle, "Ring disconnected and keep-connected/schedule are OFF. Not auto-reconnecting to save ring battery.")
+            _connectionState.value = ConnectionState.Disconnected
+            return
+        }
+
         val lastAddr = healthRepository.lastConnectedAddress ?: return
         val lastName = healthRepository.lastConnectedName ?: "Galaxy Ring"
 
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
             try {
-                AppLog.i(tagBle, "Ring disconnected unexpectedly. Scheduling auto-reconnect backoff...")
+                AppLog.i(tagBle, "Ring disconnected unexpectedly with keep-connected/schedule ON. Scheduling auto-reconnect backoff...")
                 var delayMs = 3000L
                 while (isActive && !isUserDisconnect && _connectionState.value is ConnectionState.Disconnected) {
                     delay(delayMs)
@@ -781,11 +986,16 @@ class BleRepository(
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     mtuFallbackRunnable?.let { mainHandler.removeCallbacks(it) }
                     mtuFallbackRunnable = null
-                    AppLog.w(tagBle, "Disconnected from GATT server")
+                    AppLog.w(tagBle, "Disconnected from GATT server (status=$status)")
                     bleManager.resetSession()
                     _connectionState.value = ConnectionState.Disconnected
                     stopSimulation()
-                    scheduleAutoReconnect()
+                    if (!isUserDisconnect) {
+                        if (status == 8) {
+                            AppLog.w(tagBle, "GATT connection timeout (status=8). Ring went out of range or entered sleep.")
+                        }
+                        scheduleAutoReconnect()
+                    }
                 }
             } catch (e: Exception) {
                 AppLog.e(tagBle, "Exception in onConnectionStateChange: ${e.message}", e)

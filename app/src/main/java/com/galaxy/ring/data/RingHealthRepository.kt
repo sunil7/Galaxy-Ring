@@ -53,6 +53,25 @@ class RingHealthRepository(private val context: Context) {
         get() = prefs.getString("last_connected_name", "Galaxy Ring")
         set(value) = prefs.edit().putString("last_connected_name", value).apply()
 
+    // Keep ring connected foreground persistence
+    var isKeepConnected: Boolean
+        get() = prefs.getBoolean("keep_connected", false)
+        set(value) = prefs.edit().putBoolean("keep_connected", value).apply()
+
+    // Bluetooth bonding preference
+    var isBondingEnabled: Boolean
+        get() = prefs.getBoolean("bonding_enabled", true)
+        set(value) = prefs.edit().putBoolean("bonding_enabled", value).apply()
+
+    // Scheduled background checks run tracking
+    var lastScheduleRunTimestamp: Long
+        get() = prefs.getLong("last_schedule_run_timestamp", 0L)
+        set(value) = prefs.edit().putLong("last_schedule_run_timestamp", value).apply()
+
+    var lastScheduleRunResult: String?
+        get() = prefs.getString("last_schedule_run_result", null)
+        set(value) = prefs.edit().putString("last_schedule_run_result", value).apply()
+
     // Sleep apnea screening self-reported checklist
     var apneaLoudSnoring: Boolean
         get() = prefs.getBoolean("apnea_loud_snoring", false)
@@ -66,24 +85,54 @@ class RingHealthRepository(private val context: Context) {
         get() = prefs.getBoolean("apnea_observed_pauses", false)
         set(value) = prefs.edit().putBoolean("apnea_observed_pauses", value).apply()
 
+    /**
+     * Saves a single Heart Rate sample to Room DB.
+     * Safety net: If a sample exists within +-60s, updates that row instead of inserting a duplicate.
+     */
     suspend fun saveHeartRate(bpm: Int, timestamp: Long = System.currentTimeMillis(), isManual: Boolean = false) {
-        val entity = HeartRateEntity(
-            timestamp = timestamp,
-            bpm = bpm,
-            recordingMethod = if (isManual) "MANUAL" else "AUTOMATIC"
-        )
-        hrDao.insert(entity)
-        AppLog.d(tag, "Saved HR sample to Room: $bpm bpm (manual=$isManual)")
+        val existing = hrDao.findSampleBetween(timestamp - 60000L, timestamp + 60000L)
+        if (existing != null) {
+            val updated = existing.copy(
+                timestamp = timestamp,
+                bpm = bpm,
+                recordingMethod = if (isManual) "MANUAL" else "AUTOMATIC"
+            )
+            hrDao.update(updated)
+            AppLog.d(tag, "Updated existing HR sample within 60s in Room: $bpm bpm (manual=$isManual)")
+        } else {
+            val entity = HeartRateEntity(
+                timestamp = timestamp,
+                bpm = bpm,
+                recordingMethod = if (isManual) "MANUAL" else "AUTOMATIC"
+            )
+            hrDao.insert(entity)
+            AppLog.d(tag, "Saved HR sample to Room: $bpm bpm (manual=$isManual)")
+        }
     }
 
+    /**
+     * Saves a single SpO2 sample to Room DB.
+     * Safety net: If a sample exists within +-60s, updates that row instead of inserting a duplicate.
+     */
     suspend fun saveOxygenSaturation(percentage: Float, timestamp: Long = System.currentTimeMillis(), isManual: Boolean = false) {
-        val entity = OxygenSaturationEntity(
-            timestamp = timestamp,
-            percentage = percentage,
-            recordingMethod = if (isManual) "MANUAL" else "AUTOMATIC"
-        )
-        spo2Dao.insert(entity)
-        AppLog.d(tag, "Saved SpO2 sample to Room: $percentage% (manual=$isManual)")
+        val existing = spo2Dao.findSampleBetween(timestamp - 60000L, timestamp + 60000L)
+        if (existing != null) {
+            val updated = existing.copy(
+                timestamp = timestamp,
+                percentage = percentage,
+                recordingMethod = if (isManual) "MANUAL" else "AUTOMATIC"
+            )
+            spo2Dao.update(updated)
+            AppLog.d(tag, "Updated existing SpO2 sample within 60s in Room: $percentage% (manual=$isManual)")
+        } else {
+            val entity = OxygenSaturationEntity(
+                timestamp = timestamp,
+                percentage = percentage,
+                recordingMethod = if (isManual) "MANUAL" else "AUTOMATIC"
+            )
+            spo2Dao.insert(entity)
+            AppLog.d(tag, "Saved SpO2 sample to Room: $percentage% (manual=$isManual)")
+        }
     }
 
     suspend fun saveDailySteps(steps: Long, calories: Int, distanceMeters: Double, timestamp: Long = System.currentTimeMillis()) {
@@ -207,6 +256,51 @@ class RingHealthRepository(private val context: Context) {
         val id = sleepDao.insert(entity)
         AppLog.d(tag, "Saved manual sleep override for date=$dateStr ($durationMinutes mins, score=${analysis.sleepScore})")
         return id
+    }
+
+    /**
+     * Deduplicates history: collapses samples of same metric within 60s keeping the latest nonzero value.
+     * Returns Pair(hrDuplicatesRemoved, spo2DuplicatesRemoved).
+     */
+    suspend fun deduplicateHistory(): Pair<Int, Int> {
+        var hrRemoved = 0
+        var spo2Removed = 0
+
+        val allHr = hrDao.getAllSamplesAsc()
+        var lastHr: HeartRateEntity? = null
+        for (record in allHr) {
+            if (lastHr != null && Math.abs(record.timestamp - lastHr.timestamp) <= 60000L) {
+                // If current record has valid reading, keep it and delete older record
+                if (record.bpm > 0) {
+                    hrDao.deleteById(lastHr.id)
+                    lastHr = record
+                } else {
+                    hrDao.deleteById(record.id)
+                }
+                hrRemoved++
+            } else {
+                lastHr = record
+            }
+        }
+
+        val allSpo2 = spo2Dao.getAllSamplesAsc()
+        var lastSpo2: OxygenSaturationEntity? = null
+        for (record in allSpo2) {
+            if (lastSpo2 != null && Math.abs(record.timestamp - lastSpo2.timestamp) <= 60000L) {
+                if (record.percentage > 0) {
+                    spo2Dao.deleteById(lastSpo2.id)
+                    lastSpo2 = record
+                } else {
+                    spo2Dao.deleteById(record.id)
+                }
+                spo2Removed++
+            } else {
+                lastSpo2 = record
+            }
+        }
+
+        AppLog.i(tag, "History deduplication completed: removed $hrRemoved HR records and $spo2Removed SpO2 records")
+        return Pair(hrRemoved, spo2Removed)
     }
 
     /**
