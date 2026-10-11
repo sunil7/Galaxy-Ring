@@ -66,6 +66,11 @@ class GalaxyRingBLEManager(
     var isNotificationEnabled: Boolean = false
         private set
 
+    // One-shot lifecycle flags per connection
+    @Volatile var servicesConfigured: Boolean = false
+    @Volatile var cccdEnabled: Boolean = false
+    @Volatile var initStarted: Boolean = false
+
     // Telemetry & Diagnostic state
     var rxCountSinceConnect: Int = 0
         private set
@@ -144,6 +149,16 @@ class GalaxyRingBLEManager(
         isMeasuringActive = false
         _initState.value = InitState.Idle
 
+        servicesConfigured = false
+        cccdEnabled = false
+        initStarted = false
+        isNotificationEnabled = false
+        foundService0xA00A = false
+        foundWrite0xB002 = false
+        foundNotify0xB003 = false
+        writeCharacteristic = null
+        notifyCharacteristic = null
+
         synchronized(rxBufferLock) {
             rxBuffer = ByteArray(0)
         }
@@ -161,7 +176,10 @@ class GalaxyRingBLEManager(
     }
 
     fun markNotificationEnabled(enabled: Boolean) {
-        isNotificationEnabled = enabled
+        if (enabled) {
+            isNotificationEnabled = true
+            cccdEnabled = true
+        }
     }
 
     fun getLastRxSince(sinceTimestamp: Long): Pair<Int, String>? {
@@ -172,6 +190,10 @@ class GalaxyRingBLEManager(
 
     fun onDescriptorWriteCompleted(descriptor: BluetoothGattDescriptor, status: Int) {
         AppLog.d(tag, "onDescriptorWriteCompleted: ${descriptor.uuid}, status=$status")
+        if (status == BluetoothGatt.GATT_SUCCESS) {
+            isNotificationEnabled = true
+            cccdEnabled = true
+        }
         pendingDescriptorDeferred?.complete(status)
     }
 
@@ -187,33 +209,38 @@ class GalaxyRingBLEManager(
     /**
      * Discovers 0xA00A service, binds 0xB002 write and 0xB003 notify.
      * Enables CCCD only on 0xB003 once and waits for onDescriptorWrite callback.
+     * If already configured, returns immediately without re-triggering descriptor writes.
      */
     @SuppressLint("MissingPermission")
     suspend fun setupNotificationObserver(gatt: BluetoothGatt): Boolean {
+        if (servicesConfigured && (cccdEnabled || isNotificationEnabled)) {
+            AppLog.i(tag, "setupNotificationObserver: Service 0xA00A and CCCD already configured for this connection. Skipping duplicate setup.")
+            return true
+        }
+
         return try {
             val deviceAddr = try { gatt.device?.address ?: "Unknown" } catch (_: Exception) { "Unknown" }
             AppLog.i(tag, "Configuring RWfit service 0xA00A for $deviceAddr")
 
-            foundService0xA00A = false
-            foundWrite0xB002 = false
-            foundNotify0xB003 = false
-            isNotificationEnabled = false
-            writeCharacteristic = null
-            notifyCharacteristic = null
+            if (writeCharacteristic == null || notifyCharacteristic == null) {
+                foundService0xA00A = false
+                foundWrite0xB002 = false
+                foundNotify0xB003 = false
 
-            for (service in gatt.services) {
-                if (Protocol.matchesShortUuid(service.uuid, "A00A")) {
-                    foundService0xA00A = true
-                    for (ch in service.characteristics) {
-                        if (Protocol.matchesShortUuid(ch.uuid, "B002")) {
-                            writeCharacteristic = ch
-                            foundWrite0xB002 = true
-                            logCharProperties("0xB002", ch)
-                        }
-                        if (Protocol.matchesShortUuid(ch.uuid, "B003")) {
-                            notifyCharacteristic = ch
-                            foundNotify0xB003 = true
-                            logCharProperties("0xB003", ch)
+                for (service in gatt.services) {
+                    if (Protocol.matchesShortUuid(service.uuid, "A00A")) {
+                        foundService0xA00A = true
+                        for (ch in service.characteristics) {
+                            if (Protocol.matchesShortUuid(ch.uuid, "B002")) {
+                                writeCharacteristic = ch
+                                foundWrite0xB002 = true
+                                logCharProperties("0xB002", ch)
+                            }
+                            if (Protocol.matchesShortUuid(ch.uuid, "B003")) {
+                                notifyCharacteristic = ch
+                                foundNotify0xB003 = true
+                                logCharProperties("0xB003", ch)
+                            }
                         }
                     }
                 }
@@ -228,15 +255,27 @@ class GalaxyRingBLEManager(
 
             // Enable notify on 0xB003 once; wait for onDescriptorWrite success
             val targetNotify = notifyCharacteristic!!
-            AppLog.i(tag, "Subscribing CCCD on 0xB003 (${targetNotify.uuid})...")
-            val cccdOk = enableB003Notification(gatt, targetNotify)
-            if (!cccdOk) {
-                AppLog.e(tag, "CCCD descriptor write failed or timed out on 0xB003")
-                lastFailedInitStep = "CCCD Enable Failed"
-                return false
+            if (!cccdEnabled && !isNotificationEnabled) {
+                AppLog.i(tag, "Subscribing CCCD on 0xB003 (${targetNotify.uuid})...")
+                val cccdOk = enableB003Notification(gatt, targetNotify)
+                if (!cccdOk) {
+                    if (isNotificationEnabled || rxCountSinceConnect > 0) {
+                        AppLog.w(tag, "CCCD returned false but notifications/RX already active. Continuing.")
+                        cccdEnabled = true
+                        servicesConfigured = true
+                        return true
+                    }
+                    AppLog.e(tag, "CCCD descriptor write failed or timed out on 0xB003")
+                    lastFailedInitStep = "CCCD Enable Failed"
+                    return false
+                }
+                isNotificationEnabled = true
+                cccdEnabled = true
+            } else {
+                AppLog.i(tag, "CCCD already enabled on 0xB003; skipping redundant descriptor write.")
             }
 
-            isNotificationEnabled = true
+            servicesConfigured = true
             AppLog.i(tag, "CCCD on 0xB003 write CONFIRMED. Ready for RWfit init sequence.")
             true
         } catch (e: Exception) {
@@ -263,6 +302,10 @@ class GalaxyRingBLEManager(
         gatt: BluetoothGatt,
         char: BluetoothGattCharacteristic
     ): Boolean {
+        if (cccdEnabled || isNotificationEnabled) {
+            AppLog.i(tag, "enableB003Notification: CCCD already active on ${char.uuid}, skipping writeDescriptor.")
+            return true
+        }
         return try {
             val localDeferred = CompletableDeferred<Int>()
             pendingDescriptorDeferred = localDeferred
@@ -576,6 +619,15 @@ class GalaxyRingBLEManager(
      * Sets ConnectionState.Ready only if REAL RX was received and init completed.
      */
     suspend fun runInitializationSequence(gatt: BluetoothGatt): Boolean {
+        if (initStarted && _initState.value is InitState.Success) {
+            AppLog.i(tag, "runInitializationSequence: Already successfully initialized. Skipping duplicate run.")
+            return true
+        }
+        if (initStarted && _initState.value is InitState.InProgress) {
+            AppLog.w(tag, "runInitializationSequence: Initialization already in progress. Ignoring duplicate run.")
+            return false
+        }
+        initStarted = true
         AppLog.i(tag, "Starting RWfit Initialization Sequence...")
         val totalSteps = 4
 

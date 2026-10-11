@@ -96,6 +96,7 @@ class BleRepository(
     private var simulationJob: Job? = null
     private var reconnectJob: Job? = null
     private var isUserDisconnect = false
+    private var mtuFallbackRunnable: Runnable? = null
 
     /**
      * Checks if all required runtime Bluetooth permissions are granted.
@@ -323,6 +324,8 @@ class BleRepository(
 
         isUserDisconnect = false
         reconnectJob?.cancel()
+        mtuFallbackRunnable?.let { mainHandler.removeCallbacks(it) }
+        mtuFallbackRunnable = null
         stopScan()
         _connectionState.value = ConnectionState.Connecting(deviceName)
         AppLog.i(tagBle, "Initiating connection to $deviceName at $address...")
@@ -358,6 +361,8 @@ class BleRepository(
     fun disconnect() {
         AppLog.i(tagBle, "User requested disconnect from ring")
         isUserDisconnect = true
+        mtuFallbackRunnable?.let { mainHandler.removeCallbacks(it) }
+        mtuFallbackRunnable = null
         reconnectJob?.cancel()
         stopSimulation()
         try {
@@ -367,6 +372,7 @@ class BleRepository(
             AppLog.e(tagBle, "Error during GATT disconnect: ${e.message}", e)
         }
         currentGatt = null
+        bleManager.resetSession()
         _connectionState.value = ConnectionState.Disconnected
     }
 
@@ -374,6 +380,10 @@ class BleRepository(
      * Executes post-connection initialization and initial vitals sync.
      */
     private fun startPostConnectionFlow(gatt: BluetoothGatt, device: RingDevice) {
+        if (bleManager.initStarted) {
+            AppLog.i(tagBle, "startPostConnectionFlow: Init already started for this session. Ignoring duplicate call.")
+            return
+        }
         scope.launch {
             try {
                 // 1. Run strict Initialization Sequence via GalaxyRingBLEManager
@@ -419,8 +429,9 @@ class BleRepository(
         if (bleManager.writeCharacteristic == null) {
             return "Write characteristic (0xB002) missing."
         }
-        if (!bleManager.isNotificationEnabled) {
-            return "Notifications not enabled on ring. Check Admin logs."
+        val hasNotificationsOrRx = bleManager.isNotificationEnabled || bleManager.cccdEnabled || bleManager.rxCountSinceConnect > 0
+        if (!hasNotificationsOrRx) {
+            return "Notifications not enabled on ring (RX count: 0). Check Admin logs."
         }
         return null
     }
@@ -741,19 +752,27 @@ class BleRepository(
                         AppLog.w(tagBle, "requestMtu exception ignored: ${e.message}")
                     }
 
-                    // Fallback timer: if onMtuChanged is delayed or skipped by device, discover services
-                    mainHandler.removeCallbacksAndMessages("MTU_TIMEOUT")
-                    mainHandler.postDelayed({
+                    // Fallback timer: if onMtuChanged is delayed or skipped by device, discover services once
+                    mtuFallbackRunnable?.let { mainHandler.removeCallbacks(it) }
+                    val fallback = Runnable {
                         try {
-                            AppLog.d(tagBle, "MTU fallback trigger: discovering services on $deviceAddress...")
-                            gatt.discoverServices()
+                            if (!bleManager.servicesConfigured) {
+                                AppLog.d(tagBle, "MTU fallback trigger: discovering services on $deviceAddress...")
+                                gatt.discoverServices()
+                            } else {
+                                AppLog.d(tagBle, "MTU fallback trigger: services already configured, skipping.")
+                            }
                         } catch (e: Exception) {
                             AppLog.e(tagBle, "discoverServices fallback failed: ${e.message}", e)
                         }
-                    }, 1200)
+                    }
+                    mtuFallbackRunnable = fallback
+                    mainHandler.postDelayed(fallback, 1500)
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                    mainHandler.removeCallbacksAndMessages("MTU_TIMEOUT")
+                    mtuFallbackRunnable?.let { mainHandler.removeCallbacks(it) }
+                    mtuFallbackRunnable = null
                     AppLog.w(tagBle, "Disconnected from GATT server")
+                    bleManager.resetSession()
                     _connectionState.value = ConnectionState.Disconnected
                     stopSimulation()
                     scheduleAutoReconnect()
@@ -767,15 +786,25 @@ class BleRepository(
         @SuppressLint("MissingPermission")
         override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
             try {
-                mainHandler.removeCallbacksAndMessages("MTU_TIMEOUT")
+                mtuFallbackRunnable?.let { mainHandler.removeCallbacks(it) }
+                mtuFallbackRunnable = null
                 AppLog.i(tagBle, "onMtuChanged: mtu=$mtu, status=$status")
                 AppLog.mtuNegotiated = mtu
-                mainHandler.post {
-                    try {
-                        gatt.discoverServices()
-                    } catch (e: Exception) {
-                        AppLog.e(tagBle, "discoverServices failed in onMtuChanged: ${e.message}", e)
+                if (!bleManager.servicesConfigured) {
+                    mainHandler.post {
+                        try {
+                            if (!bleManager.servicesConfigured) {
+                                AppLog.i(tagBle, "Triggering discoverServices after MTU negotiation...")
+                                gatt.discoverServices()
+                            } else {
+                                AppLog.i(tagBle, "Services already configured, skipping discoverServices in onMtuChanged")
+                            }
+                        } catch (e: Exception) {
+                            AppLog.e(tagBle, "discoverServices failed in onMtuChanged: ${e.message}", e)
+                        }
                     }
+                } else {
+                    AppLog.i(tagBle, "onMtuChanged: services already configured, skipping discoverServices")
                 }
             } catch (e: Exception) {
                 AppLog.e(tagBle, "Exception in onMtuChanged: ${e.message}", e)
@@ -792,6 +821,14 @@ class BleRepository(
                     _connectionState.value = ConnectionState.Error(err)
                     return
                 }
+
+                if (bleManager.servicesConfigured) {
+                    AppLog.i(tagBle, "onServicesDiscovered: Services already configured for this connection. Ignoring duplicate callback.")
+                    return
+                }
+
+                mtuFallbackRunnable?.let { mainHandler.removeCallbacks(it) }
+                mtuFallbackRunnable = null
 
                 val safeAddress = try { gatt.device?.address ?: "Unknown" } catch (_: Exception) { "Unknown" }
                 val safeName = try { gatt.device?.name ?: "Galaxy Ring" } catch (_: Exception) { "Galaxy Ring" }
@@ -810,12 +847,16 @@ class BleRepository(
                     AppLog.w(tagBle, "Error reading battery char: ${e.message}")
                 }
 
-                // Setup notification observer: primary 0xB003 first, then candidates, then startPostConnectionFlow
+                // Setup notification observer: primary 0xB003 once, then startPostConnectionFlow once
                 scope.launch {
                     try {
                         val observerConfigured = bleManager.setupNotificationObserver(gatt)
                         AppLog.i(tagBle, "Notification observer configured: $observerConfigured. Starting post connection flow...")
-                        startPostConnectionFlow(gatt, device)
+                        if (observerConfigured && !bleManager.initStarted) {
+                            startPostConnectionFlow(gatt, device)
+                        } else if (!observerConfigured) {
+                            AppLog.e(tagBle, "Failed to configure notification observer on B003")
+                        }
                     } catch (e: Exception) {
                         AppLog.e(tagBle, "Exception during setupNotificationObserver: ${e.message}", e)
                         _connectionState.value = ConnectionState.Error("Setup notification failed: ${e.message ?: "Unknown"}")
