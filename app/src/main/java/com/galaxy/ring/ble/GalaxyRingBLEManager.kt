@@ -469,10 +469,10 @@ class GalaxyRingBLEManager(
                     }
                 }
 
-                // 3. Reply to pending command (only complete if matching key and not unsolicited push)
+                // 3. Reply to pending command (complete if matching key regardless of flag)
                 val pendingKey = pendingCommandKey
-                if (pendingKey != null && pendingKey == frame.key && frame.flag != Protocol.FLAG_PUSH) {
-                    AppLog.i(tag, "Matching reply received for pending command key 0x${"%04X".format(pendingKey)}")
+                if (pendingKey != null && pendingKey == frame.key) {
+                    AppLog.i(tag, "Matching reply received for pending command key 0x${"%04X".format(pendingKey)} [flag=0x${"%02X".format(frame.flag)}]")
                     pendingCommandDeferred?.complete(frame)
                 }
 
@@ -851,45 +851,46 @@ class GalaxyRingBLEManager(
     }
 
     /**
-     * Executes the strict 0x051B sleep query sequence:
-     * A) 051B keyFlag 0x10
-     * B) 051B keyFlag 0x00
-     * C) 051B keyFlag 0x10 + data 0x00 (last night)
-     * D) 051B keyFlag 0x10 + data 0x01 (yesterday)
-     * Timeout 10s, 1 retry each. First RX wins -> parse/save sleep or leave empty.
+     * Executes the robust 0x051B sleep query sequence:
+     * 1) key 0x051B, keyFlag 0x10, no data
+     * 2) key 0x051B, keyFlag 0x00, no data
+     * 3) key 0x051B, keyFlag 0x10, data [0x00] (last night / today)
+     * 4) key 0x051B, keyFlag 0x10, data [0x01] (yesterday)
+     * 5) key 0x051B, keyFlag 0x10, data [0x00, 0x01] (today + yesterday)
+     * Timeout 12s per attempt, 1 retry each. Stops at first valid RX.
      */
     suspend fun syncSleepSequence(gatt: BluetoothGatt): com.galaxy.ring.data.SleepSession? {
-        AppLog.i(tag, "Starting 051B Sleep Query Sequence (A -> B -> C -> D, timeout 10s each, 1 retry)...")
+        AppLog.i(tag, "Starting 051B Sleep Query Sequence (Variants 1..5, timeout 12s each, 1 retry)...")
 
         val queries = listOf(
-            Triple("A (051B keyFlag=0x10 empty)", Protocol.buildSleepCommandA(), "05 1B 10"),
-            Triple("B (051B keyFlag=0x00 empty)", Protocol.buildSleepCommandB(), "05 1B 00"),
-            Triple("C (051B keyFlag=0x10 data=0x00 last night)", Protocol.buildSleepCommandC(), "05 1B 10 00"),
-            Triple("D (051B keyFlag=0x10 data=0x01 yesterday)", Protocol.buildSleepCommandD(), "05 1B 10 01")
+            Triple("1 (051B keyFlag=0x10 empty)", Protocol.buildSleepCommandA(), "05 1B 10"),
+            Triple("2 (051B keyFlag=0x00 empty)", Protocol.buildSleepCommandB(), "05 1B 00"),
+            Triple("3 (051B keyFlag=0x10 data=0x00 last night)", Protocol.buildSleepCommandC(), "05 1B 10 00"),
+            Triple("4 (051B keyFlag=0x10 data=0x01 yesterday)", Protocol.buildSleepCommandD(), "05 1B 10 01"),
+            Triple("5 (051B keyFlag=0x10 data=0x00 0x01)", Protocol.buildSleepCommandE(), "05 1B 10 00 01")
         )
 
         for ((name, frame, spec) in queries) {
             val txHex = frame.joinToString(" ") { "%02X".format(it) }
             AppLog.i(tag, "Attempting Sleep Query $name [TX: $txHex]...")
-            val reply = executeCommand(gatt, frame, Protocol.KEY_SLEEP_PUSH, timeoutMs = 10000L, maxRetries = 1)
+            val reply = executeCommand(gatt, frame, Protocol.KEY_SLEEP_PUSH, timeoutMs = 12000L, maxRetries = 1)
             if (reply != null) {
                 val rxHex = reply.fullPayload.joinToString(" ") { "%02X".format(it) }
-                AppLog.i(tag, "Sleep Query $name SUCCEEDED! RX received from ring: $rxHex")
+                AppLog.i(tag, "Sleep Query $name SUCCEEDED! RX received from ring: $rxHex (flag=0x${"%02X".format(reply.flag)})")
                 val sleep = Protocol.parseSleepFrame(reply)
                 if (sleep != null) {
                     AppLog.i(tag, "Sleep session successfully parsed from $name: ${sleep.durationMinutes} mins")
                     _sleepFlow.emit(sleep)
                     return sleep
                 } else {
-                    AppLog.i(tag, "Sleep Query $name returned payload with 0/empty sleep duration; no dummy sleep recorded.")
-                    return null
+                    AppLog.i(tag, "Sleep Query $name returned payload ($rxHex) but 0 or invalid sleep duration; trying next variant...")
                 }
             } else {
-                AppLog.w(tag, "Sleep Query $name timed out (0 RX).")
+                AppLog.w(tag, "Sleep Query $name timed out after 12s (0 RX).")
             }
         }
 
-        AppLog.i(tag, "Sleep Query A-D complete: 0 RX received for 051B. Sleep left empty without dummy data.")
+        AppLog.e(tag, "Sleep Query 1-5 complete: 0 valid sleep RX received for 051B. Last TX: $lastTxHex. Sleep left empty without dummy data.")
         return null
     }
 }

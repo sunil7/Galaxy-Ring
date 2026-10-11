@@ -166,3 +166,17 @@ sealed class SyncStatus {
     data class Success(val message: String, val timestamp: Long = System.currentTimeMillis()) : SyncStatus()
     data class Error(val message: String) : SyncStatus()
 }
+
+/**
+ * Result returned by the sequential telemetry sync from ring.
+ */
+data class SyncResult(
+    val success: Boolean,
+    val steps: Long = 0L,
+    val hasSleep: Boolean = false,
+    val sleepMinutes: Long = 0L,
+    val healthConnectWritten: Boolean = false,
+    val hcStatus: String = "",
+    val message: String = ""
+)
+

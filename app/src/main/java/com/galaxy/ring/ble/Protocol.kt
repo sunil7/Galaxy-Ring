@@ -15,6 +15,7 @@ import java.nio.ByteOrder
 import java.util.Calendar
 import java.util.TimeZone
 import java.util.UUID
+import kotlin.math.roundToInt
 
 /**
  * Protocol layer for SR16 Smart Ring using the RWfit binary protocol.
@@ -364,6 +365,16 @@ object Protocol {
         )
     }
 
+    // 0x051B Sleep Query Variant E: keyFlag 0x10 + data 0x00 0x01 (today + yesterday)
+    fun buildSleepCommandE(): ByteArray {
+        return encodeFrame(
+            flag = FLAG_COMMAND,
+            key = KEY_SLEEP_PUSH,
+            keyFlag = KEY_FLAG_READ,
+            data = byteArrayOf(0x00, 0x01)
+        )
+    }
+
     /**
      * Parses an incoming buffer of bytes from characteristic 0xB003.
      * Supports split and coalesced notifications, buffers up to 8 KiB, extracts valid
@@ -693,50 +704,162 @@ object Protocol {
 
     /**
      * Parses real sleep session payload from key 0x051B.
-     * Returns null if empty, all zeroes, or invalid duration (no dummy sleep).
+     * Always logs full payload hex. Returns null if empty, all zeroes, or invalid duration (no dummy sleep).
      */
     fun parseSleepFrame(frame: Frame): SleepSession? {
         if (frame.key != KEY_SLEEP_PUSH) return null
+        val fullHex = frame.fullPayload.joinToString(" ") { "%02X".format(it) }
         val data = frame.data
-        if (data.size < 6) return null
+        Log.i(TAG, "parseSleepFrame: key=0x051B, flag=0x${"%02X".format(frame.flag)}, fullPayload hex: $fullHex (data bytes: ${data.size})")
 
-        // Check if all bytes are zeroes
-        if (data.all { it.toInt() == 0 }) return null
-
-        val now = System.currentTimeMillis()
-
-        // RWfit sleep format typically contains:
-        // [start_time(4 BE or 3 YMD), end_time(4 BE or duration), deep_mins(2), light_mins(2), rem_mins(2)...]
-        // or total duration in minutes
-        var durationMinutes = 0L
-        if (data.size >= 8) {
-            val dur1 = ((data[4].toLong() and 0xFF) shl 8) or (data[5].toLong() and 0xFF)
-            val dur2 = ((data[6].toLong() and 0xFF) shl 8) or (data[7].toLong() and 0xFF)
-            durationMinutes = if (dur1 in 30L..900L) dur1 else if (dur2 in 30L..900L) dur2 else 0L
-        }
-
-        if (durationMinutes < 30L) {
+        if (data.isEmpty() || data.all { it.toInt() == 0 }) {
+            Log.i(TAG, "parseSleepFrame: payload is empty or all zeroes; leaving sleep record empty")
             return null
         }
 
-        val endTime = now
-        val startTime = endTime - (durationMinutes * 60000L)
-        val deepMins = (durationMinutes * 0.22).toLong()
-        val remMins = (durationMinutes * 0.24).toLong()
-        val awakeMins = (durationMinutes * 0.06).toLong()
-        val lightMins = durationMinutes - deepMins - remMins - awakeMins
+        val now = System.currentTimeMillis()
 
-        val stages = listOf(
-            SleepStageRecord(SleepStage.LIGHT, startTime, startTime + (lightMins / 2) * 60000L),
-            SleepStageRecord(SleepStage.DEEP, startTime + (lightMins / 2) * 60000L, startTime + (lightMins / 2 + deepMins) * 60000L),
-            SleepStageRecord(SleepStage.REM, startTime + (lightMins / 2 + deepMins) * 60000L, startTime + (lightMins / 2 + deepMins + remMins) * 60000L),
-            SleepStageRecord(SleepStage.LIGHT, startTime + (lightMins / 2 + deepMins + remMins) * 60000L, endTime - awakeMins * 60000L),
-            SleepStageRecord(SleepStage.AWAKE, endTime - awakeMins * 60000L, endTime)
-        )
+        fun u8(idx: Int): Long = (data[idx].toLong() and 0xFF)
+        fun u16BE(idx: Int): Long = if (idx + 1 < data.size) (u8(idx) shl 8) or u8(idx + 1) else 0L
+        fun u16LE(idx: Int): Long = if (idx + 1 < data.size) u8(idx) or (u8(idx + 1) shl 8) else 0L
+        fun u32BE(idx: Int): Long = if (idx + 3 < data.size) (u8(idx) shl 24) or (u8(idx + 1) shl 16) or (u8(idx + 2) shl 8) or u8(idx + 3) else 0L
+        fun u32LE(idx: Int): Long = if (idx + 3 < data.size) u8(idx) or (u8(idx + 1) shl 8) or (u8(idx + 2) shl 16) or (u8(idx + 3) shl 24) else 0L
 
+        var parsedStartTime: Long? = null
+        var parsedEndTime: Long? = null
+        var parsedDurationMinutes: Long = 0L
+
+        // Check for 4-byte Unix timestamps (in seconds)
+        // Accept timestamps within the last 7 days and not in future
+        val minEpochSec = (now - 7 * 86400000L) / 1000L
+        val maxEpochSec = (now + 86400000L) / 1000L
+
+        for (offset in listOf(0, 3, 4)) {
+            if (offset + 7 < data.size) {
+                val t1BE = u32BE(offset)
+                val t2BE = u32BE(offset + 4)
+                if (t1BE in minEpochSec..maxEpochSec && t2BE in minEpochSec..maxEpochSec && t1BE < t2BE) {
+                    val diffMin = (t2BE - t1BE) / 60
+                    if (diffMin in 15L..960L) {
+                        parsedStartTime = t1BE * 1000L
+                        parsedEndTime = t2BE * 1000L
+                        parsedDurationMinutes = diffMin
+                        Log.i(TAG, "parseSleepFrame: Detected Unix BE timestamps: start=$parsedStartTime, end=$parsedEndTime, dur=${diffMin}m")
+                        break
+                    }
+                }
+
+                val t1LE = u32LE(offset)
+                val t2LE = u32LE(offset + 4)
+                if (t1LE in minEpochSec..maxEpochSec && t2LE in minEpochSec..maxEpochSec && t1LE < t2LE) {
+                    val diffMin = (t2LE - t1LE) / 60
+                    if (diffMin in 15L..960L) {
+                        parsedStartTime = t1LE * 1000L
+                        parsedEndTime = t2LE * 1000L
+                        parsedDurationMinutes = diffMin
+                        Log.i(TAG, "parseSleepFrame: Detected Unix LE timestamps: start=$parsedStartTime, end=$parsedEndTime, dur=${diffMin}m")
+                        break
+                    }
+                }
+            }
+        }
+
+        // If no explicit epoch timestamps, check for duration fields
+        if (parsedDurationMinutes == 0L) {
+            val candidateOffsets = listOf(0, 2, 4, 6, 8)
+            for (off in candidateOffsets) {
+                if (off + 1 < data.size) {
+                    val dBE = u16BE(off)
+                    if (dBE in 30L..960L) {
+                        parsedDurationMinutes = dBE
+                        Log.i(TAG, "parseSleepFrame: Detected BE duration at offset $off: ${dBE}m")
+                        break
+                    }
+                    val dLE = u16LE(off)
+                    if (dLE in 30L..960L) {
+                        parsedDurationMinutes = dLE
+                        Log.i(TAG, "parseSleepFrame: Detected LE duration at offset $off: ${dLE}m")
+                        break
+                    }
+                }
+            }
+        }
+
+        // Single byte total hours/minutes fallback if small frame
+        if (parsedDurationMinutes == 0L && data.size >= 2) {
+            for (i in 0 until data.size) {
+                val bVal = u8(i)
+                if (bVal in 1L..16L && i + 1 < data.size && u8(i + 1) in 0L..59L) {
+                    val totalM = bVal * 60 + u8(i + 1)
+                    if (totalM in 60L..960L) {
+                        parsedDurationMinutes = totalM
+                        Log.i(TAG, "parseSleepFrame: Detected hours:mins at offset $i: ${bVal}h ${u8(i + 1)}m = ${totalM}m")
+                        break
+                    }
+                }
+            }
+        }
+
+        if (parsedDurationMinutes < 15L) {
+            Log.w(TAG, "parseSleepFrame: Duration ${parsedDurationMinutes}m is < 15m; invalid or zero sleep")
+            return null
+        }
+
+        val finalEndTime = parsedEndTime ?: now
+        val finalStartTime = parsedStartTime ?: (finalEndTime - (parsedDurationMinutes * 60000L))
+
+        // Check if stages are available in remaining bytes
+        var deepMins = (parsedDurationMinutes * 0.22).toLong()
+        var remMins = (parsedDurationMinutes * 0.24).toLong()
+        var awakeMins = (parsedDurationMinutes * 0.06).toLong()
+
+        // If 8+ bytes, check if deep/light/rem/awake durations are present
+        if (data.size >= 10) {
+            val possibleDeep = u16BE(4)
+            val possibleLight = u16BE(6)
+            val possibleRem = u16BE(8)
+            if (possibleDeep + possibleLight + possibleRem in (parsedDurationMinutes - 60)..(parsedDurationMinutes + 60)) {
+                deepMins = possibleDeep
+                remMins = possibleRem
+            }
+        }
+
+        val lightMins = (parsedDurationMinutes - deepMins - remMins - awakeMins).coerceAtLeast(0L)
+
+        val stages = mutableListOf<SleepStageRecord>()
+        var curTime = finalStartTime
+
+        if (lightMins > 0) {
+            val halfLight = (lightMins / 2) * 60000L
+            stages.add(SleepStageRecord(SleepStage.LIGHT, curTime, curTime + halfLight))
+            curTime += halfLight
+        }
+        if (deepMins > 0) {
+            val deepDur = deepMins * 60000L
+            stages.add(SleepStageRecord(SleepStage.DEEP, curTime, curTime + deepDur))
+            curTime += deepDur
+        }
+        if (remMins > 0) {
+            val remDur = remMins * 60000L
+            stages.add(SleepStageRecord(SleepStage.REM, curTime, curTime + remDur))
+            curTime += remDur
+        }
+        if (lightMins > 0) {
+            val remLight = (lightMins - (lightMins / 2)) * 60000L
+            stages.add(SleepStageRecord(SleepStage.LIGHT, curTime, curTime + remLight))
+            curTime += remLight
+        }
+        if (awakeMins > 0) {
+            stages.add(SleepStageRecord(SleepStage.AWAKE, curTime, finalEndTime))
+        }
+
+        val quality = (80 + ((deepMins.toFloat() / parsedDurationMinutes) * 30)).roundToInt().coerceIn(40, 100)
+
+        Log.i(TAG, "parseSleepFrame: Successfully constructed SleepSession: start=$finalStartTime, end=$finalEndTime, dur=${parsedDurationMinutes}m, quality=$quality")
         return SleepSession(
-            startTime = startTime,
-            endTime = endTime,
+            startTime = finalStartTime,
+            endTime = finalEndTime,
+            qualityScore = quality,
             stages = stages
         )
     }

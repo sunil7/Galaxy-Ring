@@ -133,6 +133,8 @@ fun MainScreen(
     val snapshot by bleRepo.snapshot.collectAsState()
     val discoveredDevices by bleRepo.discoveredDevices.collectAsState()
     val measurementState by bleRepo.manualMeasurementState.collectAsState()
+    val isSyncing by bleRepo.isSyncing.collectAsState()
+    val syncProgressMsg by bleRepo.syncProgressMessage.collectAsState()
 
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -144,6 +146,34 @@ fun MainScreen(
     var showAdminScreen by remember { mutableStateOf(false) }
 
     val bottomSheetState = rememberModalBottomSheetState()
+
+    val handleSyncFromRing: () -> Unit = {
+        scope.launch {
+            if (connectionState !is ConnectionState.Ready) {
+                val stateName = when (connectionState) {
+                    is ConnectionState.Connecting -> "Connecting"
+                    is ConnectionState.Initializing -> "Initializing"
+                    is ConnectionState.Scanning -> "Scanning"
+                    is ConnectionState.Connected -> "Connected (completing handshake)"
+                    is ConnectionState.Error -> "Error"
+                    else -> "Disconnected"
+                }
+                snackbarHostState.showSnackbar("Cannot sync: Ring is $stateName (Ready state required).")
+                return@launch
+            }
+            syncStatus = SyncStatus.Syncing
+            val res = bleRepo.syncRingData(isAutomatic = false)
+            if (res.success) {
+                val sleepStr = if (res.hasSleep) "yes (${res.sleepMinutes}m)" else "no"
+                val msg = "Synced: steps=${res.steps}, sleep=$sleepStr | HC: ${res.hcStatus}"
+                syncStatus = SyncStatus.Success(msg)
+                snackbarHostState.showSnackbar(msg)
+            } else {
+                syncStatus = SyncStatus.Error(res.message)
+                snackbarHostState.showSnackbar("Sync failed: ${res.message}")
+            }
+        }
+    }
 
     LaunchedEffect(measurementState) {
         val current = measurementState
@@ -244,23 +274,10 @@ fun MainScreen(
                         onMeasureSpo2 = {
                             bleRepo.measureOxygenSaturation()
                         },
-                        onSyncNow = {
-                            scope.launch {
-                                syncStatus = SyncStatus.Syncing
-                                try {
-                                    val updated = bleRepo.requestSync()
-                                    val success = healthWriter.writeSnapshot(updated)
-                                    syncStatus = if (success) {
-                                        SyncStatus.Success("Synced vitals to Health Connect")
-                                    } else {
-                                        SyncStatus.Success("Synced locally (Health Connect ready)")
-                                    }
-                                    snackbarHostState.showSnackbar("Vitals synchronized with Health Connect")
-                                } catch (e: Exception) {
-                                    syncStatus = SyncStatus.Error(e.message ?: "Sync error")
-                                }
-                            }
-                        },
+                        onSyncNow = handleSyncFromRing,
+                        onSyncFromRing = handleSyncFromRing,
+                        isSyncing = isSyncing,
+                        syncProgressText = syncProgressMsg,
                         onRequestPermissions = onRequestHealthPermissions,
                         onOpenRationale = onOpenRationale,
                         onNavigateToSleep = { selectedTab = 2 },
@@ -268,15 +285,24 @@ fun MainScreen(
                     )
                 }
                 1 -> {
-                    HistoryScreen()
+                    HistoryScreen(
+                        onSyncFromRing = handleSyncFromRing,
+                        isSyncing = isSyncing,
+                        syncProgressText = syncProgressMsg
+                    )
                 }
                 2 -> {
-                    SleepScreen()
+                    SleepScreen(
+                        onSyncFromRing = handleSyncFromRing,
+                        isSyncing = isSyncing,
+                        syncProgressText = syncProgressMsg
+                    )
                 }
                 3 -> {
                     SettingsScreen(
                         onOpenHealthRationale = onOpenRationale,
                         hasHealthPermissions = hasHealthPermissions,
+                        onRequestHealthPermissions = onRequestHealthPermissions,
                         onOpenAdmin = { showAdminScreen = true }
                     )
                 }
@@ -330,6 +356,9 @@ fun DeviceDashboard(
     onMeasureHeartRate: () -> Unit,
     onMeasureSpo2: () -> Unit,
     onSyncNow: () -> Unit,
+    onSyncFromRing: () -> Unit = onSyncNow,
+    isSyncing: Boolean = false,
+    syncProgressText: String? = null,
     onRequestPermissions: () -> Unit,
     onOpenRationale: () -> Unit,
     onNavigateToSleep: () -> Unit,
@@ -360,7 +389,21 @@ fun DeviceDashboard(
                 snapshot = snapshot,
                 isFindingRing = isFindingRing,
                 onFindMyRing = onFindMyRing,
-                onConnectClick = onConnectClick
+                onConnectClick = onConnectClick,
+                onSyncFromRing = onSyncFromRing,
+                isSyncing = isSyncing,
+                syncProgressText = syncProgressText
+            )
+        }
+
+        // 2b. Primary Telemetry Sync Card
+        item {
+            RingSyncCard(
+                isReady = connectionState is ConnectionState.Ready,
+                isSyncing = isSyncing,
+                syncProgressText = syncProgressText,
+                lastSyncTime = snapshot.lastSyncTimestamp,
+                onSyncFromRing = onSyncFromRing
             )
         }
 
@@ -1107,7 +1150,10 @@ fun RingHeroCard(
     snapshot: RingHealthSnapshot,
     isFindingRing: Boolean,
     onFindMyRing: () -> Unit,
-    onConnectClick: () -> Unit
+    onConnectClick: () -> Unit,
+    onSyncFromRing: () -> Unit = {},
+    isSyncing: Boolean = false,
+    syncProgressText: String? = null
 ) {
     val isConnected = connectionState is ConnectionState.Ready || connectionState is ConnectionState.Connected || connectionState is ConnectionState.Initializing || connectionState is ConnectionState.Syncing
 
@@ -1236,9 +1282,49 @@ fun RingHeroCard(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 if (isConnected) {
+                    val isReady = connectionState is ConnectionState.Ready
+                    Button(
+                        onClick = onSyncFromRing,
+                        enabled = isReady && !isSyncing,
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .testTag("sync_from_ring_button"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                    ) {
+                        if (isSyncing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = Color(0xFF0F172A),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = syncProgressText ?: "Syncing...",
+                                color = Color(0xFF0F172A),
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Sync,
+                                contentDescription = null,
+                                tint = Color(0xFF0F172A),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Sync from ring",
+                                color = Color(0xFF0F172A),
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
+
                     FilledTonalButton(
                         onClick = onFindMyRing,
                         modifier = Modifier
@@ -1255,7 +1341,7 @@ fun RingHeroCard(
                             modifier = Modifier.size(18.dp),
                             tint = CyberCyan
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(if (isFindingRing) "Pulsing..." else "Find Ring")
                     }
                 } else {
@@ -1276,6 +1362,130 @@ fun RingHeroCard(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Connect Ring", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RingSyncCard(
+    isReady: Boolean,
+    isSyncing: Boolean,
+    syncProgressText: String?,
+    lastSyncTime: Long?,
+    onSyncFromRing: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = CardDefaults.outlinedCardBorder().copy(
+            brush = Brush.horizontalGradient(
+                listOf(CyberCyan.copy(alpha = 0.4f), ElectricViolet.copy(alpha = 0.2f), Color.Transparent)
+            )
+        )
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(CyberCyan.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Sync,
+                            contentDescription = null,
+                            tint = CyberCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Telemetry Sync",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (lastSyncTime != null && lastSyncTime > 0)
+                                "Last synced: ${DateFormat.format("h:mm a", Date(lastSyncTime))}"
+                            else "Never synced",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = onSyncFromRing,
+                    enabled = isReady && !isSyncing,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                ) {
+                    if (isSyncing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Color(0xFF0F172A),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = syncProgressText ?: "Syncing...",
+                            color = Color(0xFF0F172A),
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Sync,
+                            contentDescription = null,
+                            tint = Color(0xFF0F172A),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Sync from ring",
+                            color = Color(0xFF0F172A),
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
+            }
+
+            if (isSyncing) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(CyberCyan.copy(alpha = 0.1f))
+                        .padding(10.dp)
+                ) {
+                    Text(
+                        text = syncProgressText ?: "Syncing… steps / sleep / vitals",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = CyberCyan
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp)),
+                        color = CyberCyan,
+                        trackColor = CyberCyan.copy(alpha = 0.2f)
+                    )
                 }
             }
         }

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.TrendingDown
 import androidx.compose.material.icons.filled.TrendingUp
@@ -41,6 +42,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.FilterChip
@@ -110,7 +112,11 @@ enum class SleepTimeRange(val label: String) {
 }
 
 @Composable
-fun SleepScreen() {
+fun SleepScreen(
+    onSyncFromRing: () -> Unit = {},
+    isSyncing: Boolean = false,
+    syncProgressText: String? = null
+) {
     val app = GalaxyRingApp.instance
     val repo = app.healthRepository
     val scope = rememberCoroutineScope()
@@ -306,19 +312,41 @@ fun SleepScreen() {
                                 )
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Text(
-                                    text = "No sleep data for this day",
+                                    text = "No sleep data from ring. Wear overnight, then tap Sync from ring.",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    textAlign = TextAlign.Center
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Wear your Galaxy Ring overnight to track sleep stages, efficiency, score, and hypnogram.",
+                                    text = "051B sleep query tries 5 key/flag variants to retrieve real nocturnal sleep stages.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = TextAlign.Center
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
+                                Button(
+                                    onClick = onSyncFromRing,
+                                    enabled = !isSyncing,
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                                ) {
+                                    if (isSyncing) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            color = Color(0xFF0F172A),
+                                            strokeWidth = 2.dp
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(syncProgressText ?: "Syncing...", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                                    } else {
+                                        Icon(imageVector = Icons.Default.Sync, contentDescription = null, tint = Color(0xFF0F172A), modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Sync from ring", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(10.dp))
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {

@@ -32,6 +32,7 @@ import com.galaxy.ring.data.SkinTemperature
 import com.galaxy.ring.data.SleepAnalyzer
 import com.galaxy.ring.data.SleepSession
 import com.galaxy.ring.data.StepData
+import com.galaxy.ring.data.SyncResult
 import com.galaxy.ring.debug.AppLog
 import com.galaxy.ring.health.HealthConnectWriter
 import kotlinx.coroutines.CoroutineScope
@@ -92,6 +93,18 @@ class BleRepository(
     val manualMeasurementState: StateFlow<ManualMeasurementState> = _manualMeasurementState.asStateFlow()
 
     val rxCountSinceConnect: StateFlow<Int> = bleManager.rxCountFlow
+
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+
+    private val _syncProgressMessage = MutableStateFlow<String?>(null)
+    val syncProgressMessage: StateFlow<String?> = _syncProgressMessage.asStateFlow()
+
+    private var lastAutoSyncTimestamp: Long = 0L
+
+    val lastWriteError: String? get() = healthWriter.lastWriteError
+    val lastWriteTime: Long? get() = healthWriter.lastWriteTime
+    val lastWriteStatus: String get() = healthWriter.lastWriteStatus
 
     private var simulationJob: Job? = null
     private var reconnectJob: Job? = null
@@ -417,6 +430,17 @@ class BleRepository(
                 // Only set Ready if real RX was received during init!
                 _connectionState.value = ConnectionState.Ready(device, rxTotal)
                 AppLog.i(tagBle, "SR16 Ring marked READY. Total RX frames since connect: $rxTotal")
+
+                // Automatically trigger sync once after init reaches Ready (debounced 30s)
+                val nowTime = System.currentTimeMillis()
+                if (nowTime - lastAutoSyncTimestamp > 30000L) {
+                    lastAutoSyncTimestamp = nowTime
+                    scope.launch {
+                        delay(1200)
+                        AppLog.i(tagSync, "Auto-triggering telemetry sync after reaching READY...")
+                        syncRingData(isAutomatic = true)
+                    }
+                }
 
                 // B2: Optional Bluetooth bonding after successful initialization
                 if (healthRepository.isBondingEnabled) {
@@ -814,47 +838,133 @@ class BleRepository(
         return true
     }
 
-    suspend fun requestSync(): RingHealthSnapshot {
-        val gatt = currentGatt ?: run {
-            AppLog.w(tagSync, "No active GATT connection; returning current snapshot unchanged")
-            return _snapshot.value
+    /**
+     * Executes sequential sync job:
+     * A) Steps (0x051A, keyFlag 0x10)
+     * B) Sleep (0x051B sequence 1..5)
+     * C) Telemetry update
+     * D) Writes newly parsed data to Room + Health Connect
+     */
+    suspend fun syncRingData(isAutomatic: Boolean = false): SyncResult {
+        val state = _connectionState.value
+        if (state !is ConnectionState.Ready) {
+            val msg = "Ring is not in Ready state (current: $state)"
+            AppLog.w(tagSync, "Sync skipped: $msg")
+            return SyncResult(success = false, message = msg, hcStatus = "Ring not Ready")
         }
 
-        try {
-            AppLog.i(tagSync, "Requesting real telemetry sync from SR16 ring...")
+        val gatt = currentGatt ?: run {
+            val msg = "No active BLE GATT connection"
+            AppLog.w(tagSync, "Sync skipped: $msg")
+            return SyncResult(success = false, message = msg, hcStatus = "No connection")
+        }
 
-            // Steps today (0x051A)
+        if (_isSyncing.value) {
+            AppLog.w(tagSync, "Sync already in progress; ignoring duplicate request")
+            return SyncResult(success = false, message = "Sync already in progress", hcStatus = "Busy")
+        }
+
+        _isSyncing.value = true
+        _syncProgressMessage.value = "Syncing steps (0x051A)..."
+        AppLog.i(tagSync, "=== Sequential Sync Started (isAutomatic=$isAutomatic) ===")
+
+        var stepsCount = 0L
+        var sleepSession: SleepSession? = null
+        var hcSuccess = false
+
+        try {
+            // A) Steps query (0x051A, keyFlag 0x10)
+            AppLog.i(tagSync, "A) Requesting daily steps from ring (0x051A)...")
             val stepsData = bleManager.fetchSteps(gatt)
             if (stepsData != null) {
-                AppLog.i(tagSync, "Steps updated from 0x051A: ${stepsData.totalSteps}")
+                stepsCount = stepsData.totalSteps
                 _snapshot.value = _snapshot.value.copy(steps = stepsData)
-                healthRepository.saveDailySteps(steps = stepsData.totalSteps, calories = stepsData.caloriesKcal, distanceMeters = stepsData.distanceMeters)
-                healthWriter.writeSteps(stepsData)
+                healthRepository.saveDailySteps(stepsData.totalSteps, stepsData.caloriesKcal, stepsData.distanceMeters)
+                val sOk = healthWriter.writeSteps(stepsData)
+                if (sOk) hcSuccess = true
+                AppLog.i(tagSync, "Steps sync completed: $stepsCount steps (HC write: $sOk)")
+            } else {
+                AppLog.w(tagSync, "Steps query did not return valid data from 0x051A")
             }
-            delay(250)
 
-            // Sleep (0x051B sequence: A -> B -> C -> D)
-            val sleepSession = bleManager.syncSleepSequence(gatt)
+            delay(300)
+
+            // Cancel if disconnected
+            if (currentGatt == null || _connectionState.value is ConnectionState.Disconnected) {
+                AppLog.w(tagSync, "Ring disconnected during steps sync. Aborting remaining sync.")
+                return SyncResult(success = false, steps = stepsCount, message = "Ring disconnected mid-sync", hcStatus = "Disconnected")
+            }
+
+            // B) Sleep query (0x051B sequence: 1..5)
+            _syncProgressMessage.value = "Syncing sleep (0x051B)..."
+            AppLog.i(tagSync, "B) Requesting overnight sleep session from ring (0x051B sequence)...")
+            sleepSession = bleManager.syncSleepSequence(gatt)
             if (sleepSession != null) {
-                AppLog.i(tagSleep, "Sleep session updated from 0x051B: ${sleepSession.durationMinutes} min")
                 val analysis = SleepAnalyzer.analyze(sleepSession, (healthRepository.sleepTargetHours * 60).toLong())
                 _snapshot.value = _snapshot.value.copy(latestSleep = sleepSession, latestSleepAnalysis = analysis)
                 healthRepository.saveSleepSession(sleepSession)
-                healthWriter.writeSleepSession(sleepSession)
+                val slOk = healthWriter.writeSleepSession(sleepSession)
+                if (slOk) hcSuccess = true
+                AppLog.i(tagSync, "Sleep sync completed: ${sleepSession.durationMinutes} mins (HC write: $slOk)")
+            } else {
+                AppLog.w(tagSync, "No sleep data returned from 0x051B after all 5 variants. Last TX: ${bleManager.lastTxHex}")
             }
+
             delay(200)
 
+            // C) Status check & snapshot update
+            _syncProgressMessage.value = "Updating vitals..."
             val now = System.currentTimeMillis()
-            val updated = _snapshot.value.copy(
+            _snapshot.value = _snapshot.value.copy(
                 lastSyncTimestamp = now,
                 isSimulatedTelemetry = false
             )
-            _snapshot.value = updated
-            return updated
+
+            // D) Health Connect verification
+            val hasHcPerms = healthWriter.hasAllPermissions()
+            val hcStatus = if (!healthWriter.isHealthConnectAvailable()) {
+                "HC unavailable"
+            } else if (!hasHcPerms) {
+                "HC permission required"
+            } else if (hcSuccess) {
+                "HC OK"
+            } else {
+                healthWriter.lastWriteStatus
+            }
+
+            val sleepStr = if (sleepSession != null) "yes (${sleepSession.durationMinutes}m)" else "no"
+            val resultSummary = "Synced: steps=$stepsCount, sleep=$sleepStr"
+            AppLog.i(tagSync, "=== Sequential Sync Finished: $resultSummary | HC: $hcStatus ===")
+
+            return SyncResult(
+                success = true,
+                steps = stepsCount,
+                hasSleep = sleepSession != null,
+                sleepMinutes = sleepSession?.durationMinutes ?: 0L,
+                healthConnectWritten = hcSuccess,
+                hcStatus = hcStatus,
+                message = resultSummary
+            )
         } catch (e: Exception) {
-            AppLog.e(tagSync, "Exception during requestSync: ${e.message}", e)
-            return _snapshot.value
+            AppLog.e(tagSync, "Exception during sequential sync: ${e.message}", e)
+            return SyncResult(
+                success = false,
+                steps = stepsCount,
+                hasSleep = sleepSession != null,
+                sleepMinutes = sleepSession?.durationMinutes ?: 0L,
+                healthConnectWritten = hcSuccess,
+                hcStatus = "Error: ${e.message}",
+                message = e.message ?: "Sync failed"
+            )
+        } finally {
+            _isSyncing.value = false
+            _syncProgressMessage.value = null
         }
+    }
+
+    suspend fun requestSync(): RingHealthSnapshot {
+        syncRingData(isAutomatic = false)
+        return _snapshot.value
     }
 
     fun stopSimulation() {

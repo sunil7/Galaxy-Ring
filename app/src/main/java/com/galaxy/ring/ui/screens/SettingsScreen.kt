@@ -48,6 +48,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -77,6 +78,7 @@ import java.util.Locale
 fun SettingsScreen(
     onOpenHealthRationale: () -> Unit,
     hasHealthPermissions: Boolean,
+    onRequestHealthPermissions: () -> Unit = {},
     onOpenAdmin: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -770,6 +772,11 @@ fun SettingsScreen(
 
         // 3. Health Connect Integration Status Card
         item {
+            val healthWriter = app.healthConnectWriter
+            val lastWriteTime by healthWriter.lastWriteTimeFlow.collectAsState()
+            val lastWriteError by healthWriter.lastWriteErrorFlow.collectAsState()
+            val lastWriteStatus by healthWriter.lastWriteStatusFlow.collectAsState()
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(22.dp),
@@ -799,14 +806,15 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = "Health Connect Permissions",
+                                    text = "Health Connect Status",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = if (hasHealthPermissions) "All permissions granted" else "Permissions required",
+                                    text = if (hasHealthPermissions) "Permitted: Yes (All permissions granted)" else "Permitted: No (Permissions required)",
                                     style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
                                     color = if (hasHealthPermissions) NeonEmerald else RosePulse
                                 )
                             }
@@ -817,7 +825,88 @@ fun SettingsScreen(
                                 imageVector = Icons.Default.Check,
                                 contentDescription = null,
                                 tint = NeonEmerald,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (!hasHealthPermissions) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(RosePulse.copy(alpha = 0.12f))
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = "Health Connect permission required to write HR, SpO₂, steps, and sleep records to Android Health Connect.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = onRequestHealthPermissions,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                            ) {
+                                Text(
+                                    text = "Connect Health Connect",
+                                    color = Color(0xFF0F172A),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+
+                    // Status Breakdown
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Last write time:",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            val timeText = if (lastWriteTime != null && lastWriteTime!! > 0L) {
+                                SimpleDateFormat("MMM d, h:mm:ss a", Locale.US).format(Date(lastWriteTime!!))
+                            } else {
+                                "No writes yet"
+                            }
+                            Text(
+                                text = timeText,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Last write result:",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = lastWriteError ?: lastWriteStatus,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (lastWriteError != null) RosePulse else if (lastWriteTime != null) NeonEmerald else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -828,6 +917,15 @@ fun SettingsScreen(
                         text = "Synchronizes steps, active and resting heart rate, oxygen saturation (SpO₂), skin temperature, and sleep stages directly with Android Health Connect.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Helpful FW Note for Sleep
+                    Text(
+                        text = "Tip: If sleep is empty after overnight wear, open official RWFit once after a night, then sync here (some ring firmware only exposes sleep cache after vendor app handshake).",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CyberCyan.copy(alpha = 0.9f)
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
