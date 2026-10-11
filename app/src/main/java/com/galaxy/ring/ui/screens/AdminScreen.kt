@@ -291,16 +291,55 @@ fun AdminScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "Working Frame Variant:",
+                                text = "Last RX Frame:",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = bleManager.workingVariantName ?: "Testing variants (0 RX)",
+                                text = bleManager.lastRxHex ?: "None yet",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (bleManager.lastRxHex != null) NeonEmerald else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Protocol Framing:",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "RWfit (AB 01 len2 crc2)",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = if (bleManager.workingVariantName != null) NeonEmerald else CyberCyan
+                                color = NeonEmerald
                             )
+                        }
+
+                        if (bleManager.lastFailedInitStep != null) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Last Failed Init Step:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFEF4444)
+                                )
+                                Text(
+                                    text = bleManager.lastFailedInitStep ?: "None",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFEF4444)
+                                )
+                            }
                         }
                     }
                 }
@@ -338,34 +377,9 @@ fun AdminScreen(
                             uuid = "0000B003-0000-1000-8000-00805F9B34FB"
                         )
                         GattRow(
-                            label = "Service 0xFF00 found",
-                            found = bleManager.foundService0xFF00,
-                            uuid = "0000FF00 (Chars: 0xFF01, 0xFF02, 0xFF03)"
-                        )
-                        GattRow(
-                            label = "Write 0xFF01 found",
-                            found = bleManager.foundChar0xFF01,
-                            uuid = "0000FF01 (Fallback command write path)"
-                        )
-                        GattRow(
-                            label = "Notify 0xFF02 / 0xFF03 found",
-                            found = bleManager.foundChar0xFF02 || bleManager.foundChar0xFF03,
-                            uuid = "0000FF02 / 0000FF03"
-                        )
-                        GattRow(
-                            label = "Service 0x0BC0 found",
-                            found = bleManager.foundService0x0BC0,
-                            uuid = "00000BC0 (Chars: 0x0BC1, 0x0BC2)"
-                        )
-                        GattRow(
-                            label = "Notify 0x0BC1 / 0x0BC2 found",
-                            found = bleManager.foundChar0x0BC1 || bleManager.foundChar0x0BC2,
-                            uuid = "00000BC1 / 00000BC2"
-                        )
-                        GattRow(
                             label = "CCCD Notifications active",
                             found = bleManager.isNotificationEnabled,
-                            uuid = "Subscribed across candidate notify/indicate chars"
+                            uuid = "Subscribed to 0xB003 (CCCD 0x2902)"
                         )
                     }
                 }

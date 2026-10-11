@@ -376,30 +376,19 @@ class BleRepository(
     private fun startPostConnectionFlow(gatt: BluetoothGatt, device: RingDevice) {
         scope.launch {
             try {
-                // 1. Run Initialization Sequence via GalaxyRingBLEManager (tries frame variants & write types)
-                bleManager.runInitializationSequence(gatt)
-
-                // 2. Sync Initial Vitals
-                _connectionState.value = ConnectionState.Syncing("Syncing steps & latest vitals...")
-                delay(200)
-
-                // Request steps today (05 1A)
-                bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_STEPS_TODAY, timeoutMs = 1800L)
-                delay(250)
-
-                // Request Heart Rate (02 24)
-                bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_HEART_RATE, timeoutMs = 1800L)
-                delay(250)
-
-                // Request SpO2 (02 4E)
-                bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_SPO2, timeoutMs = 1800L)
-                delay(250)
-
-                // Request Sleep (05 1B)
-                bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_PULL_SLEEP, timeoutMs = 1800L)
-                delay(200)
-
+                // 1. Run strict Initialization Sequence via GalaxyRingBLEManager
+                _connectionState.value = ConnectionState.Initializing(1, 4)
+                val initOk = bleManager.runInitializationSequence(gatt)
                 val rxTotal = bleManager.rxCountSinceConnect
+
+                if (!initOk || rxTotal == 0) {
+                    val failReason = bleManager.lastFailedInitStep ?: "0 RX frames received from ring during init"
+                    AppLog.e(tagBle, "Initialization failed: $failReason. Remaining in Error state.")
+                    _connectionState.value = ConnectionState.Error("Init failed: $failReason. Export logs.")
+                    return@launch
+                }
+
+                // Only set Ready if real RX was received during init!
                 _connectionState.value = ConnectionState.Ready(device, rxTotal)
                 AppLog.i(tagBle, "SR16 Ring marked READY. Total RX frames since connect: $rxTotal")
             } catch (e: Exception) {
@@ -427,8 +416,8 @@ class BleRepository(
             }
             return "Not READY (current: $stateLabel). Wait until Ready."
         }
-        if (bleManager.writeCharacteristic == null && bleManager.altWriteCharacteristic == null) {
-            return "Write characteristic (0xB002/0xFF01) missing."
+        if (bleManager.writeCharacteristic == null) {
+            return "Write characteristic (0xB002) missing."
         }
         if (!bleManager.isNotificationEnabled) {
             return "Notifications not enabled on ring. Check Admin logs."
@@ -453,11 +442,11 @@ class BleRepository(
             try {
                 _manualMeasurementState.value = ManualMeasurementState.Measuring("Heart Rate", progress = 0.05f)
                 val startTime = System.currentTimeMillis()
-                AppLog.i(tagBle, "Measure Heart Rate START (CMD 02 24)")
+                AppLog.i(tagBle, "Measure Heart Rate START (0609 type=0x03)")
 
-                val writeOk = bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_HEART_RATE, timeoutMs = 3000L)
-                if (!writeOk) {
-                    val writeErr = "BLE write failed (stack rejected command)."
+                val startOk = bleManager.startHeartRateMeasurement(gatt)
+                if (!startOk) {
+                    val writeErr = "Ring rejected Heart Rate start command (0609)."
                     AppLog.e(tagBle, "Measure Heart Rate write error: $writeErr")
                     AppLog.lastMeasureResult = "Heart Rate: Error - $writeErr"
                     _manualMeasurementState.value = ManualMeasurementState.Error(
@@ -467,7 +456,8 @@ class BleRepository(
                     return@launch
                 }
 
-                val maxWaitMs = 20000L
+                // Wait up to ~60s (per spec) or until reading arrives
+                val maxWaitMs = 60000L
                 val pollStepMs = 500L
                 val totalSteps = (maxWaitMs / pollStepMs).toInt()
                 var sampleFound: HeartRateSample? = null
@@ -479,11 +469,18 @@ class BleRepository(
                         sampleFound = latest
                         break
                     }
-                    val progress = (step.toFloat() / totalSteps.toFloat()).coerceIn(0.1f, 0.95f)
+                    if (!bleManager.isMeasuringActive) {
+                        // Ring signaled completion via 0609 status
+                        break
+                    }
+                    val progress = (step.toFloat() / totalSteps.toFloat()).coerceIn(0.05f, 0.95f)
                     if (_manualMeasurementState.value is ManualMeasurementState.Measuring) {
                         _manualMeasurementState.value = ManualMeasurementState.Measuring("Heart Rate", progress = progress)
                     }
                 }
+
+                // Stop measurement
+                bleManager.stopHeartRateMeasurement(gatt)
 
                 if (sampleFound != null) {
                     healthRepository.saveHeartRate(bpm = sampleFound.bpm, timestamp = sampleFound.timestamp, isManual = true)
@@ -501,17 +498,17 @@ class BleRepository(
                     val errorReason = if (rxSince != null) {
                         val (byteCount, hex) = rxSince
                         val truncatedHex = if (hex.length > 36) hex.take(33) + "…" else hex
-                        "Ring replied ($byteCount bytes) but HR/SpO₂ parse failed. Last RX: $truncatedHex. Export logs."
+                        "Ring replied ($byteCount bytes) but no valid HR sample received. Last RX: $truncatedHex. Export logs."
                     } else {
                         val lastKnownRx = bleManager.lastRxHex
                         if (lastKnownRx != null) {
                             val truncatedHex = if (lastKnownRx.length > 36) lastKnownRx.take(33) + "…" else lastKnownRx
-                            "No notify from ring within 20s. Last RX: $truncatedHex. See Admin → Logs for TX/RX hex."
+                            "Measurement timed out (60s). Last RX: $truncatedHex. See Admin → Logs for TX/RX hex."
                         } else {
-                            "No notify from ring within 20s. See Admin → Logs for TX/RX hex."
+                            "Measurement timed out (60s). See Admin → Logs for TX/RX hex."
                         }
                     }
-                    AppLog.w(tagBle, "Manual Heart Rate measurement TIMEOUT (20s): $errorReason")
+                    AppLog.w(tagBle, "Manual Heart Rate measurement TIMEOUT (60s): $errorReason")
                     AppLog.lastMeasureResult = "Heart Rate: Error - $errorReason"
                     _manualMeasurementState.value = ManualMeasurementState.Error(
                         metric = "Heart Rate",
@@ -545,11 +542,11 @@ class BleRepository(
             try {
                 _manualMeasurementState.value = ManualMeasurementState.Measuring("SpO₂", progress = 0.05f)
                 val startTime = System.currentTimeMillis()
-                AppLog.i(tagBle, "Measure SpO₂ START (CMD 02 4E)")
+                AppLog.i(tagBle, "Measure SpO₂ START (0609 type=0x09)")
 
-                val writeOk = bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_SPO2, timeoutMs = 3000L)
-                if (!writeOk) {
-                    val writeErr = "BLE write failed (stack rejected command)."
+                val startOk = bleManager.startSpO2Measurement(gatt)
+                if (!startOk) {
+                    val writeErr = "Ring rejected SpO₂ start command (0609)."
                     AppLog.e(tagBle, "Measure SpO₂ write error: $writeErr")
                     AppLog.lastMeasureResult = "SpO₂: Error - $writeErr"
                     _manualMeasurementState.value = ManualMeasurementState.Error(
@@ -559,7 +556,8 @@ class BleRepository(
                     return@launch
                 }
 
-                val maxWaitMs = 20000L
+                // Wait up to ~60s or until reading arrives
+                val maxWaitMs = 60000L
                 val pollStepMs = 500L
                 val totalSteps = (maxWaitMs / pollStepMs).toInt()
                 var sampleFound: OxygenSaturationSample? = null
@@ -571,11 +569,18 @@ class BleRepository(
                         sampleFound = latest
                         break
                     }
-                    val progress = (step.toFloat() / totalSteps.toFloat()).coerceIn(0.1f, 0.95f)
+                    if (!bleManager.isMeasuringActive) {
+                        // Ring signaled completion
+                        break
+                    }
+                    val progress = (step.toFloat() / totalSteps.toFloat()).coerceIn(0.05f, 0.95f)
                     if (_manualMeasurementState.value is ManualMeasurementState.Measuring) {
                         _manualMeasurementState.value = ManualMeasurementState.Measuring("SpO₂", progress = progress)
                     }
                 }
+
+                // Stop measurement
+                bleManager.stopSpO2Measurement(gatt)
 
                 if (sampleFound != null) {
                     healthRepository.saveOxygenSaturation(percentage = sampleFound.percentage, timestamp = sampleFound.timestamp, isManual = true)
@@ -593,17 +598,17 @@ class BleRepository(
                     val errorReason = if (rxSince != null) {
                         val (byteCount, hex) = rxSince
                         val truncatedHex = if (hex.length > 36) hex.take(33) + "…" else hex
-                        "Ring replied ($byteCount bytes) but HR/SpO₂ parse failed. Last RX: $truncatedHex. Export logs."
+                        "Ring replied ($byteCount bytes) but no valid SpO₂ sample received. Last RX: $truncatedHex. Export logs."
                     } else {
                         val lastKnownRx = bleManager.lastRxHex
                         if (lastKnownRx != null) {
                             val truncatedHex = if (lastKnownRx.length > 36) lastKnownRx.take(33) + "…" else lastKnownRx
-                            "No notify from ring within 20s. Last RX: $truncatedHex. See Admin → Logs for TX/RX hex."
+                            "Measurement timed out (60s). Last RX: $truncatedHex. See Admin → Logs for TX/RX hex."
                         } else {
-                            "No notify from ring within 20s. See Admin → Logs for TX/RX hex."
+                            "Measurement timed out (60s). See Admin → Logs for TX/RX hex."
                         }
                     }
-                    AppLog.w(tagBle, "Manual SpO₂ measurement TIMEOUT (20s): $errorReason")
+                    AppLog.w(tagBle, "Manual SpO₂ measurement TIMEOUT (60s): $errorReason")
                     AppLog.lastMeasureResult = "SpO₂: Error - $errorReason"
                     _manualMeasurementState.value = ManualMeasurementState.Error(
                         metric = "SpO₂",
@@ -626,13 +631,14 @@ class BleRepository(
 
     fun findMyRing(): Boolean {
         val state = _connectionState.value
-        if (state !is ConnectionState.Ready && state !is ConnectionState.Connected) return false
+        if (state !is ConnectionState.Ready) return false
 
         scope.launch {
             try {
                 currentGatt?.let { gatt ->
-                    AppLog.i(tagBle, "Sending Find My Ring command (03 05)")
-                    bleManager.sendCommandFrameWithRetry(gatt, byteArrayOf(0x03, 0x05))
+                    AppLog.i(tagBle, "Sending Find My Ring command (0x0305)")
+                    val frame = Protocol.buildFindRingCommand()
+                    bleManager.executeCommand(gatt, frame, Protocol.KEY_FIND_RING, timeoutMs = 3000L)
                 }
             } catch (e: Exception) {
                 AppLog.e(tagBle, "Error in findMyRing: ${e.message}", e)
@@ -650,20 +656,14 @@ class BleRepository(
         try {
             AppLog.i(tagSync, "Requesting real telemetry sync from SR16 ring...")
 
-            // Steps today (05 1A)
-            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_STEPS_TODAY, timeoutMs = 2000L)
-            delay(300)
+            // Steps today (0x051A)
+            val stepsFrame = Protocol.buildStepsCommand()
+            bleManager.executeCommand(gatt, stepsFrame, Protocol.KEY_STEPS_PUSH, timeoutMs = 3000L)
+            delay(250)
 
-            // Heart Rate (02 24)
-            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_HEART_RATE, timeoutMs = 2000L)
-            delay(300)
-
-            // SpO₂ (02 4E)
-            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_MEASURE_SPO2, timeoutMs = 2000L)
-            delay(300)
-
-            // Sleep (05 1B)
-            bleManager.sendCommandFrameWithRetry(gatt, Protocol.CMD_PULL_SLEEP, timeoutMs = 2000L)
+            // Sleep (0x051B)
+            val sleepFrame = Protocol.buildSleepCommand()
+            bleManager.executeCommand(gatt, sleepFrame, Protocol.KEY_SLEEP_PUSH, timeoutMs = 3000L)
             delay(200)
 
             val now = System.currentTimeMillis()
