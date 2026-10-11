@@ -16,6 +16,7 @@ import java.util.Calendar
 import java.util.TimeZone
 import java.util.UUID
 import kotlin.math.roundToInt
+import com.galaxy.ring.debug.AppLog
 
 /**
  * Protocol layer for SR16 Smart Ring using the RWfit binary protocol.
@@ -711,9 +712,11 @@ object Protocol {
         val fullHex = frame.fullPayload.joinToString(" ") { "%02X".format(it) }
         val data = frame.data
         Log.i(TAG, "parseSleepFrame: key=0x051B, flag=0x${"%02X".format(frame.flag)}, fullPayload hex: $fullHex (data bytes: ${data.size})")
+        AppLog.i("Protocol", "parseSleepFrame: key=0x051B, flag=0x${"%02X".format(frame.flag)}, fullPayload hex: $fullHex (data bytes: ${data.size})")
 
         if (data.isEmpty() || data.all { it.toInt() == 0 }) {
             Log.i(TAG, "parseSleepFrame: payload is empty or all zeroes; leaving sleep record empty")
+            AppLog.i("Protocol", "parseSleepFrame: payload is empty or all zeroes; leaving sleep record empty")
             return null
         }
 
@@ -802,6 +805,7 @@ object Protocol {
 
         if (parsedDurationMinutes < 15L) {
             Log.w(TAG, "parseSleepFrame: Duration ${parsedDurationMinutes}m is < 15m; invalid or zero sleep")
+            AppLog.w("Protocol", "parseSleepFrame: Duration ${parsedDurationMinutes}m is < 15m; invalid or zero sleep")
             return null
         }
 
@@ -856,6 +860,7 @@ object Protocol {
         val quality = (80 + ((deepMins.toFloat() / parsedDurationMinutes) * 30)).roundToInt().coerceIn(40, 100)
 
         Log.i(TAG, "parseSleepFrame: Successfully constructed SleepSession: start=$finalStartTime, end=$finalEndTime, dur=${parsedDurationMinutes}m, quality=$quality")
+        AppLog.i("Protocol", "parseSleepFrame: Successfully constructed SleepSession: start=$finalStartTime, end=$finalEndTime, dur=${parsedDurationMinutes}m, quality=$quality")
         return SleepSession(
             startTime = finalStartTime,
             endTime = finalEndTime,

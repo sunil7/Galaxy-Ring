@@ -329,6 +329,7 @@ fun SleepScreen(
                                 Button(
                                     onClick = onSyncFromRing,
                                     enabled = !isSyncing,
+                                    modifier = Modifier.testTag("sleep_sync_button"),
                                     shape = RoundedCornerShape(12.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
                                 ) {

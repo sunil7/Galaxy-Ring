@@ -1428,6 +1428,7 @@ fun RingSyncCard(
                 Button(
                     onClick = onSyncFromRing,
                     enabled = isReady && !isSyncing,
+                    modifier = Modifier.testTag("ring_sync_card_button"),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
                 ) {

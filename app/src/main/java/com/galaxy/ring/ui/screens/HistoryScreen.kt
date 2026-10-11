@@ -165,6 +165,7 @@ fun HistoryScreen(
                 Button(
                     onClick = onSyncFromRing,
                     enabled = !isSyncing,
+                    modifier = Modifier.testTag("history_sync_button"),
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
                 ) {

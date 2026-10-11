@@ -848,7 +848,9 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.height(8.dp))
                             Button(
                                 onClick = onRequestHealthPermissions,
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("connect_health_connect_button"),
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
                             ) {
