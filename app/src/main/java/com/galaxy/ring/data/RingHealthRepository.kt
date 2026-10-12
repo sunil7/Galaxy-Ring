@@ -100,6 +100,15 @@ class RingHealthRepository(private val context: Context) {
             else prefs.edit().remove("display_command_key").apply()
         }
 
+    // Cached confirmed working path for sleep sync (0x0505) and advance mechanism
+    var sleepWorkingKey: Int
+        get() = prefs.getInt("sleep_working_key", 0x0505)
+        set(value) = prefs.edit().putInt("sleep_working_key", value).apply()
+
+    var sleepRequiresDeleteToAdvance: Boolean
+        get() = prefs.getBoolean("sleep_requires_delete", false)
+        set(value) = prefs.edit().putBoolean("sleep_requires_delete", value).apply()
+
     // Cached confirmed measurement type & push key for HRV
     var hrvWorkingType: Byte?
         get() = if (prefs.contains("hrv_working_type")) prefs.getInt("hrv_working_type", -1).takeIf { it != -1 }?.toByte() else null

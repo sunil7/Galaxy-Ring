@@ -258,41 +258,57 @@ class ProtocolTest {
     }
 
     @Test
+    fun testSleepKeysAndCommandEnums() {
+        assertEquals(0x0505, Protocol.KEY_SLEEP)
+        assertEquals(0x0505, Protocol.KEY_SLEEP_PUSH)
+        assertEquals(0x051B, Protocol.KEY_SMOKING_DETAIL_DATA)
+        assertEquals(0x0285, Protocol.KEY_SCREEN_CONTROL)
+        assertEquals(Protocol.KEY_SCREEN_CONTROL, Protocol.DISPLAY_CANDIDATE_KEYS.first())
+    }
+
+    @Test
     fun testSleepQueryCommandsAThroughE() {
-        // Sleep Query Variant A: 051B keyFlag 0x10, no data
+        // Sleep Query Variant A: 0505 keyFlag 0x10, no data
         val cmdA = Protocol.buildSleepCommandA()
         assertEquals(0xAB.toByte(), cmdA[0])
         assertEquals(Protocol.FLAG_COMMAND, cmdA[1])
-        // Key 051B
+        // Key 0505
         val fA = Protocol.parseFramesFromStream(cmdA).first[0]
-        assertEquals(Protocol.KEY_SLEEP_PUSH, fA.key)
+        assertEquals(Protocol.KEY_SLEEP, fA.key)
         assertEquals(Protocol.KEY_FLAG_READ, fA.keyFlag)
         assertEquals(0, fA.data.size)
 
-        // Variant B: 051B keyFlag 0x00, no data
+        // Variant B: 0505 keyFlag 0x00, no data
         val cmdB = Protocol.buildSleepCommandB()
         val fB = Protocol.parseFramesFromStream(cmdB).first[0]
-        assertEquals(Protocol.KEY_SLEEP_PUSH, fB.key)
+        assertEquals(Protocol.KEY_SLEEP, fB.key)
         assertEquals(Protocol.KEY_FLAG_WRITE, fB.keyFlag)
         assertEquals(0, fB.data.size)
 
-        // Variant C: 051B keyFlag 0x10, data [0x00]
+        // Variant C: 0505 keyFlag 0x10, data [0x00]
         val cmdC = Protocol.buildSleepCommandC()
         val fC = Protocol.parseFramesFromStream(cmdC).first[0]
-        assertEquals(Protocol.KEY_SLEEP_PUSH, fC.key)
+        assertEquals(Protocol.KEY_SLEEP, fC.key)
         assertEquals(byteArrayOf(0x00).toList(), fC.data.toList())
 
-        // Variant D: 051B keyFlag 0x10, data [0x01]
+        // Variant D: 0505 keyFlag 0x10, data [0x01]
         val cmdD = Protocol.buildSleepCommandD()
         val fD = Protocol.parseFramesFromStream(cmdD).first[0]
-        assertEquals(Protocol.KEY_SLEEP_PUSH, fD.key)
+        assertEquals(Protocol.KEY_SLEEP, fD.key)
         assertEquals(byteArrayOf(0x01).toList(), fD.data.toList())
 
-        // Variant E: 051B keyFlag 0x10, data [0x00, 0x01]
+        // Variant E: 0505 keyFlag 0x10, data [0x00, 0x01]
         val cmdE = Protocol.buildSleepCommandE()
         val fE = Protocol.parseFramesFromStream(cmdE).first[0]
-        assertEquals(Protocol.KEY_SLEEP_PUSH, fE.key)
+        assertEquals(Protocol.KEY_SLEEP, fE.key)
         assertEquals(byteArrayOf(0x00, 0x01).toList(), fE.data.toList())
+
+        // Sleep Delete Command: 0505 keyFlag 0x30, no data
+        val cmdDel = Protocol.buildSleepDeleteCommand()
+        val fDel = Protocol.parseFramesFromStream(cmdDel).first[0]
+        assertEquals(Protocol.KEY_SLEEP, fDel.key)
+        assertEquals(Protocol.KEY_FLAG_DELETE, fDel.keyFlag)
+        assertEquals(0, fDel.data.size)
     }
 
     @Test
@@ -300,10 +316,10 @@ class ProtocolTest {
         // Empty or all zero data must return null (no dummy data)
         val emptyFrame = Protocol.Frame(
             flag = Protocol.FLAG_PUSH,
-            key = Protocol.KEY_SLEEP_PUSH,
+            key = Protocol.KEY_SLEEP,
             keyFlag = 0x10,
             data = byteArrayOf(0x00, 0x00, 0x00, 0x00),
-            fullPayload = byteArrayOf(0x05, 0x1B, 0x10, 0x00, 0x00, 0x00, 0x00),
+            fullPayload = byteArrayOf(0x05, 0x05, 0x10, 0x00, 0x00, 0x00, 0x00),
             crcOk = true
         )
         assertNull(Protocol.parseSleepFrame(emptyFrame))
@@ -311,14 +327,14 @@ class ProtocolTest {
 
     @Test
     fun testParseSleepFrameValidDuration() {
-        // Construct 051B frame with 450 minutes duration (0x01C2 = 450)
+        // Construct 0505 frame with 450 minutes duration (0x01C2 = 450)
         val data = byteArrayOf(0x01, 0xC2.toByte(), 0x00, 0x5A, 0x00, 0x64, 0x00, 0x50)
         val frame = Protocol.Frame(
             flag = Protocol.FLAG_PUSH,
-            key = Protocol.KEY_SLEEP_PUSH,
+            key = Protocol.KEY_SLEEP,
             keyFlag = 0x10,
             data = data,
-            fullPayload = byteArrayOf(0x05, 0x1B, 0x10) + data,
+            fullPayload = byteArrayOf(0x05, 0x05, 0x10) + data,
             crcOk = true
         )
         val sleep = Protocol.parseSleepFrame(frame)
@@ -330,47 +346,16 @@ class ProtocolTest {
     }
 
     @Test
-    fun testSleepQueryCommands1Through4() {
-        // Query 1: 051B keyFlag 0x10, no data
-        val cmd1 = Protocol.buildSleepCommandA()
-        val f1 = Protocol.parseFramesFromStream(cmd1).first[0]
-        assertEquals(Protocol.KEY_SLEEP_PUSH, f1.key)
-        assertEquals(Protocol.KEY_FLAG_READ, f1.keyFlag)
-        assertEquals(0, f1.data.size)
-
-        // Query 2: 051B keyFlag 0x00, no data
-        val cmd2 = Protocol.buildSleepCommandB()
-        val f2 = Protocol.parseFramesFromStream(cmd2).first[0]
-        assertEquals(Protocol.KEY_SLEEP_PUSH, f2.key)
-        assertEquals(Protocol.KEY_FLAG_WRITE, f2.keyFlag)
-        assertEquals(0, f2.data.size)
-
-        // Query 3: 051B keyFlag 0x10, data [0x00]
-        val cmd3 = Protocol.buildSleepCommandC()
-        val f3 = Protocol.parseFramesFromStream(cmd3).first[0]
-        assertEquals(Protocol.KEY_SLEEP_PUSH, f3.key)
-        assertEquals(Protocol.KEY_FLAG_READ, f3.keyFlag)
-        assertArrayEquals(byteArrayOf(0x00), f3.data)
-
-        // Query 4: 051B keyFlag 0x10, data [0x01]
-        val cmd4 = Protocol.buildSleepCommandD()
-        val f4 = Protocol.parseFramesFromStream(cmd4).first[0]
-        assertEquals(Protocol.KEY_SLEEP_PUSH, f4.key)
-        assertEquals(Protocol.KEY_FLAG_READ, f4.keyFlag)
-        assertArrayEquals(byteArrayOf(0x01), f4.data)
-    }
-
-    @Test
     fun testParseSleepFrameSecondsDuration() {
         // 28800 seconds = 480 minutes (8 hours)
         // 28800 = 0x00007080
         val data = byteArrayOf(0x00, 0x00, 0x70, 0x80.toByte(), 0x00, 0x00)
         val frame = Protocol.Frame(
             flag = Protocol.FLAG_PUSH,
-            key = Protocol.KEY_SLEEP_PUSH,
+            key = Protocol.KEY_SLEEP,
             keyFlag = 0x10,
             data = data,
-            fullPayload = byteArrayOf(0x05, 0x1B, 0x10) + data,
+            fullPayload = byteArrayOf(0x05, 0x05, 0x10) + data,
             crcOk = true
         )
         val sleep = Protocol.parseSleepFrame(frame)
@@ -379,19 +364,19 @@ class ProtocolTest {
     }
 
     @Test
-    fun testBuildDisplayCommand() {
-        // Test ON (0x01) and OFF (0x00) for candidates
-        val cmdOn = Protocol.buildDisplayCommand(0x0306, true)
-        val parsedOn = Protocol.parseFramesFromStream(cmdOn).first[0]
-        assertEquals(0x0306, parsedOn.key)
-        assertEquals(Protocol.KEY_FLAG_WRITE, parsedOn.keyFlag)
-        assertArrayEquals(byteArrayOf(0x01), parsedOn.data)
-
-        val cmdOff = Protocol.buildDisplayCommand(0x0306, false)
+    fun testBuildDisplayCommandScreenControl() {
+        // Test screen off [0x00] and screen on [0x01] with KEY_SCREEN_CONTROL (0x0285)
+        val cmdOff = Protocol.buildDisplayCommand(Protocol.KEY_SCREEN_CONTROL, false)
         val parsedOff = Protocol.parseFramesFromStream(cmdOff).first[0]
-        assertEquals(0x0306, parsedOff.key)
+        assertEquals(0x0285, parsedOff.key)
         assertEquals(Protocol.KEY_FLAG_WRITE, parsedOff.keyFlag)
         assertArrayEquals(byteArrayOf(0x00), parsedOff.data)
+
+        val cmdOn = Protocol.buildDisplayCommand(Protocol.KEY_SCREEN_CONTROL, true)
+        val parsedOn = Protocol.parseFramesFromStream(cmdOn).first[0]
+        assertEquals(0x0285, parsedOn.key)
+        assertEquals(Protocol.KEY_FLAG_WRITE, parsedOn.keyFlag)
+        assertArrayEquals(byteArrayOf(0x01), parsedOn.data)
     }
 
     @Test

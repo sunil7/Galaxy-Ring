@@ -46,6 +46,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class BleRepository(
     private val context: Context,
@@ -1150,7 +1153,7 @@ class BleRepository(
             delay(2000)
         }
 
-        // Sync steps (051A) and sleep (051B sequence)
+        // Sync steps (051A) and sleep (0x0505 paged history)
         val synced = requestSync()
         if (synced.steps.totalSteps > 0) {
             results.add("Steps: ${synced.steps.totalSteps}")
@@ -1188,7 +1191,7 @@ class BleRepository(
     /**
      * Executes sequential sync job:
      * A) Steps (0x051A, keyFlag 0x10)
-     * B) Sleep (0x051B sequence 1..5)
+     * B) Sleep History (0x0505 paged query)
      * C) Telemetry update
      * D) Writes newly parsed data to Room + Health Connect
      */
@@ -1242,19 +1245,35 @@ class BleRepository(
                 return SyncResult(success = false, steps = stepsCount, message = "Ring disconnected mid-sync", hcStatus = "Disconnected")
             }
 
-            // B) Sleep query (0x051B sequence: 1..5)
-            _syncProgressMessage.value = "Syncing sleep (0x051B)..."
-            AppLog.i(tagSync, "B) Requesting overnight sleep session from ring (0x051B sequence)...")
-            sleepSession = bleManager.syncSleepSequence(gatt)
-            if (sleepSession != null) {
-                val analysis = SleepAnalyzer.analyze(sleepSession, (healthRepository.sleepTargetHours * 60).toLong())
-                _snapshot.value = _snapshot.value.copy(latestSleep = sleepSession, latestSleepAnalysis = analysis)
-                healthRepository.saveSleepSession(sleepSession)
-                val slOk = healthWriter.writeSleepSession(sleepSession)
-                if (slOk) hcSuccess = true
-                AppLog.i(tagSync, "Sleep sync completed: ${sleepSession.durationMinutes} mins (HC write: $slOk)")
+            // B) Sleep query (0x0505 paged history fetch)
+            _syncProgressMessage.value = "Syncing sleep (0x0505)..."
+            AppLog.i(tagSync, "B) Requesting sleep history from ring (0x0505 paged)...")
+            val sleepResult = bleManager.syncSleepHistory(gatt, healthRepository.sleepRequiresDeleteToAdvance)
+
+            // Cache working path
+            healthRepository.sleepWorkingKey = sleepResult.workingKey
+            healthRepository.sleepRequiresDeleteToAdvance = sleepResult.requiresDeleteToAdvance
+
+            val importedSessions = sleepResult.sessions
+            if (importedSessions.isNotEmpty()) {
+                val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                val sessionsByNight = importedSessions.groupBy { dateFormat.format(Date(it.endTime)) }
+
+                for ((dateStr, nightSessions) in sessionsByNight) {
+                    val bestSession = nightSessions.maxByOrNull { it.durationMinutes } ?: nightSessions.first()
+                    healthRepository.saveSleepSession(bestSession)
+                    val slOk = healthWriter.writeSleepSession(bestSession)
+                    if (slOk) hcSuccess = true
+                    AppLog.i(tagSync, "Sleep session saved for night $dateStr: ${bestSession.durationMinutes} min (HC write: $slOk)")
+                }
+
+                val latestSession = importedSessions.maxByOrNull { it.endTime }!!
+                val analysis = SleepAnalyzer.analyze(latestSession, (healthRepository.sleepTargetHours * 60).toLong())
+                _snapshot.value = _snapshot.value.copy(latestSleep = latestSession, latestSleepAnalysis = analysis)
+                sleepSession = latestSession
+                AppLog.i(tagSync, "Sleep sync completed: ${importedSessions.size} session(s) across ${sessionsByNight.size} night(s). Latest: ${latestSession.durationMinutes} mins")
             } else {
-                AppLog.w(tagSync, "No sleep data returned from 0x051B after all 5 variants. Last TX: ${bleManager.lastTxHex}")
+                AppLog.i(tagSync, "No sleep data returned from 0x0505 paged query. Last TX: ${bleManager.lastTxHex}")
             }
 
             delay(200)

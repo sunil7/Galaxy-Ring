@@ -320,7 +320,7 @@ fun SleepScreen(
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "051B sleep query tries 5 key/flag variants to retrieve real nocturnal sleep stages.",
+                                    text = "0x0505 paged sleep query retrieves real nocturnal sleep history and stages from the ring.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = TextAlign.Center

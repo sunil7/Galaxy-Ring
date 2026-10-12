@@ -86,7 +86,10 @@ object Protocol {
     const val KEY_HR_PUSH: Int = 0x0224
     const val KEY_SPO2_PUSH: Int = 0x024E
     const val KEY_STEPS_PUSH: Int = 0x051A
-    const val KEY_SLEEP_PUSH: Int = 0x051B
+    const val KEY_SLEEP: Int = 0x0505
+    const val KEY_SLEEP_PUSH: Int = 0x0505
+    const val KEY_SMOKING_DETAIL_DATA: Int = 0x051B // Official SDK DHBleCommandEnums.h: smoking data, NOT sleep
+    const val KEY_SCREEN_CONTROL: Int = 0x0285     // Official SDK DHBleCommandEnums.h: BLE_KEY_SCREEN_CONTROL [0x00]=off, [0x01]=on
 
     // Measurement Types for Key 0x0609
     const val MEASURE_TYPE_HR: Byte = 0x03.toByte()
@@ -324,8 +327,8 @@ object Protocol {
     fun buildStressStartCommand(type: Byte): ByteArray = buildMeasurementCommand(type, true)
     fun buildStressStopCommand(type: Byte): ByteArray = buildMeasurementCommand(type, false)
 
-    // Display ON / OFF probe candidate keys (A..E)
-    val DISPLAY_CANDIDATE_KEYS = listOf(0x0306, 0x0307, 0x0203, 0x0204, 0x0264)
+    // Display ON / OFF probe candidate keys (A..E) - 0x0285 (BLE_KEY_SCREEN_CONTROL) tried first
+    val DISPLAY_CANDIDATE_KEYS = listOf(KEY_SCREEN_CONTROL, 0x0306, 0x0307, 0x0203, 0x0204, 0x0264)
 
     fun buildDisplayCommand(key: Int, enabled: Boolean): ByteArray {
         val data = byteArrayOf(if (enabled) 0x01.toByte() else 0x00.toByte())
@@ -398,56 +401,40 @@ object Protocol {
         )
     }
 
-    // Default sleep command
-    fun buildSleepCommand(): ByteArray = buildSleepCommandA()
+    // Default sleep history command: key 0x0505, keyFlag 0x10 (READ), no extra data
+    fun buildSleepCommand(): ByteArray = buildSleepCommand(KEY_FLAG_READ, byteArrayOf())
 
-    // 0x051B Sleep Query Variant A: keyFlag 0x10, data empty (AB 01 00 03 AD 5A 05 1B 10)
-    fun buildSleepCommandA(): ByteArray {
+    fun buildSleepCommand(keyFlag: Byte = KEY_FLAG_READ, data: ByteArray = byteArrayOf()): ByteArray {
         return encodeFrame(
             flag = FLAG_COMMAND,
-            key = KEY_SLEEP_PUSH,
-            keyFlag = KEY_FLAG_READ,
+            key = KEY_SLEEP,
+            keyFlag = keyFlag,
+            data = data
+        )
+    }
+
+    // 0x0505 Sleep History Query Variant A: keyFlag 0x10, data empty (AB 01 00 03 AD 44 05 05 10)
+    fun buildSleepCommandA(): ByteArray = buildSleepCommand(KEY_FLAG_READ, byteArrayOf())
+
+    // 0x0505 Sleep Query Variant B: keyFlag 0x00, data empty
+    fun buildSleepCommandB(): ByteArray = buildSleepCommand(KEY_FLAG_WRITE, byteArrayOf())
+
+    // 0x0505 Sleep Query Variant C: keyFlag 0x10 + data 0x00
+    fun buildSleepCommandC(): ByteArray = buildSleepCommand(KEY_FLAG_READ, byteArrayOf(0x00))
+
+    // 0x0505 Sleep Query Variant D: keyFlag 0x10 + data 0x01
+    fun buildSleepCommandD(): ByteArray = buildSleepCommand(KEY_FLAG_READ, byteArrayOf(0x01))
+
+    // 0x0505 Sleep Query Variant E: keyFlag 0x10 + data 0x00 0x01
+    fun buildSleepCommandE(): ByteArray = buildSleepCommand(KEY_FLAG_READ, byteArrayOf(0x00, 0x01))
+
+    // 0x0505 Sleep History Delete (keyFlag 0x30): signals ring that current page was imported so ring advances to next page
+    fun buildSleepDeleteCommand(): ByteArray {
+        return encodeFrame(
+            flag = FLAG_COMMAND,
+            key = KEY_SLEEP,
+            keyFlag = KEY_FLAG_DELETE,
             data = byteArrayOf()
-        )
-    }
-
-    // 0x051B Sleep Query Variant B: keyFlag 0x00, data empty
-    fun buildSleepCommandB(): ByteArray {
-        return encodeFrame(
-            flag = FLAG_COMMAND,
-            key = KEY_SLEEP_PUSH,
-            keyFlag = KEY_FLAG_WRITE,
-            data = byteArrayOf()
-        )
-    }
-
-    // 0x051B Sleep Query Variant C: keyFlag 0x10 + data 0x00 (last night)
-    fun buildSleepCommandC(): ByteArray {
-        return encodeFrame(
-            flag = FLAG_COMMAND,
-            key = KEY_SLEEP_PUSH,
-            keyFlag = KEY_FLAG_READ,
-            data = byteArrayOf(0x00)
-        )
-    }
-
-    // 0x051B Sleep Query Variant D: keyFlag 0x10 + data 0x01 (yesterday)
-    fun buildSleepCommandD(): ByteArray {
-        return encodeFrame(
-            flag = FLAG_COMMAND,
-            key = KEY_SLEEP_PUSH,
-            keyFlag = KEY_FLAG_READ,
-            data = byteArrayOf(0x01)
-        )
-    }
-
-    // 0x051B Sleep Query Variant E: keyFlag 0x10 + data 0x00 0x01 (today + yesterday)
-    fun buildSleepCommandE(): ByteArray {
-        return encodeFrame(
-            flag = FLAG_COMMAND,
-            key = KEY_SLEEP_PUSH,
-            keyFlag = KEY_FLAG_READ,
-            data = byteArrayOf(0x00, 0x01)
         )
     }
 
@@ -779,14 +766,14 @@ object Protocol {
     }
 
     /**
-     * Parses real sleep session payload from key 0x051B.
-     * Always logs full payload hex. Returns null if empty, all zeroes, or invalid duration (no dummy sleep).
+     * Parses real sleep session payload from key 0x0505 (BLE_KEY_SLEEP).
+     * Always logs full payload hex. Returns null if empty, all zeroes, or invalid duration (< 15 min; no dummy sleep).
      */
     fun parseSleepFrame(frame: Frame): SleepSession? {
-        if (frame.key != KEY_SLEEP_PUSH) return null
+        if (frame.key != KEY_SLEEP && frame.key != KEY_SLEEP_PUSH) return null
         val fullHex = frame.fullPayload.joinToString(" ") { "%02X".format(it) }
         val data = frame.data
-        AppLog.i("Protocol", "parseSleepFrame: key=0x051B, flag=0x${"%02X".format(frame.flag)}, fullPayload hex: $fullHex (data bytes: ${data.size})")
+        AppLog.i("Protocol", "parseSleepFrame: key=0x0505, flag=0x${"%02X".format(frame.flag)}, fullPayload hex: $fullHex (data bytes: ${data.size})")
 
         if (data.isEmpty() || data.all { it.toInt() == 0 }) {
             AppLog.i("Protocol", "parseSleepFrame: payload is empty or all zeroes; leaving sleep record empty")
@@ -836,6 +823,43 @@ object Protocol {
                         AppLog.i("Protocol", "parseSleepFrame: Detected Unix LE timestamps: start=$parsedStartTime, end=$parsedEndTime, dur=${diffMin}m")
                         break
                     }
+                }
+            }
+        }
+
+        // Check for RWFit Date header: [year-2000 (e.g. 20..35), month (1..12), day (1..31)...]
+        // or [year_hi, year_lo (2020..2035), month, day...]
+        var dateHeaderCal: Calendar? = null
+        if (data.size >= 5) {
+            val y1 = data[0].toInt() and 0xFF
+            val m1 = data[1].toInt() and 0xFF
+            val d1 = data[2].toInt() and 0xFF
+            if (y1 in 20..35 && m1 in 1..12 && d1 in 1..31) {
+                dateHeaderCal = Calendar.getInstance().apply {
+                    set(Calendar.YEAR, 2000 + y1)
+                    set(Calendar.MONTH, m1 - 1)
+                    set(Calendar.DAY_OF_MONTH, d1)
+                    set(Calendar.HOUR_OF_DAY, 8)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                AppLog.i("Protocol", "parseSleepFrame: Detected RWFit date header: 20$y1-$m1-$d1")
+            } else if (data.size >= 6) {
+                val y2 = u16BE(0).toInt()
+                val m2 = data[2].toInt() and 0xFF
+                val d2 = data[3].toInt() and 0xFF
+                if (y2 in 2020..2035 && m2 in 1..12 && d2 in 1..31) {
+                    dateHeaderCal = Calendar.getInstance().apply {
+                        set(Calendar.YEAR, y2)
+                        set(Calendar.MONTH, m2 - 1)
+                        set(Calendar.DAY_OF_MONTH, d2)
+                        set(Calendar.HOUR_OF_DAY, 8)
+                        set(Calendar.MINUTE, 0)
+                        set(Calendar.SECOND, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }
+                    AppLog.i("Protocol", "parseSleepFrame: Detected RWFit 16-bit date header: $y2-$m2-$d2")
                 }
             }
         }
@@ -890,7 +914,7 @@ object Protocol {
             return null
         }
 
-        val finalEndTime = parsedEndTime ?: now
+        val finalEndTime = parsedEndTime ?: dateHeaderCal?.timeInMillis ?: now
         val finalStartTime = parsedStartTime ?: (finalEndTime - (parsedDurationMinutes * 60000L))
 
         // Check if stages are available in remaining bytes
