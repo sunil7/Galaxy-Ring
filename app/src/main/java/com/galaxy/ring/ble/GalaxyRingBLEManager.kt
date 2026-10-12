@@ -112,9 +112,13 @@ class GalaxyRingBLEManager(
     @Volatile var activeMeasureType: Byte? = null
         private set
 
-    // Measurement completion flow (emits completed metric type: 0x03 HR or 0x09 SpO2)
+    // Measurement completion flow (emits completed metric type: 0x03 HR or 0x09 SpO2, etc.)
     private val _measureCompletedFlow = MutableSharedFlow<Byte>(extraBufferCapacity = 16)
     val measureCompletedFlow: SharedFlow<Byte> = _measureCompletedFlow.asSharedFlow()
+
+    // Generic parsed frame broadcast flow for metric probes (HRV, Stress)
+    private val _incomingFrameFlow = MutableSharedFlow<Protocol.Frame>(extraBufferCapacity = 32)
+    val incomingFrameFlow: SharedFlow<Protocol.Frame> = _incomingFrameFlow.asSharedFlow()
 
     // Initialization State
     sealed class InitState {
@@ -429,6 +433,8 @@ class GalaxyRingBLEManager(
                     tag,
                     "RX Frame #${rxCountSinceConnect} [key=0x${"%04X".format(frame.key)}, keyFlag=0x${"%02X".format(frame.keyFlag)}, $flagStr, CRC OK]: $payloadHex"
                 )
+
+                _incomingFrameFlow.tryEmit(frame)
 
                 // 1. Parse ANY biometric frame with key 0x0224 (HR) or 0x024E (SpO2) REGARDLESS OF FLAG
                 if (frame.key == Protocol.KEY_HR_PUSH || frame.key == Protocol.KEY_SPO2_PUSH) {
@@ -819,6 +825,69 @@ class GalaxyRingBLEManager(
         val frame = Protocol.buildSpO2StopCommand()
         val reply = executeCommand(gatt, frame, Protocol.KEY_MEASURE_CONTROL, timeoutMs = 5000L)
         return reply != null
+    }
+
+    suspend fun startMeasurementType(gatt: BluetoothGatt, type: Byte): Boolean {
+        isMeasuringActive = true
+        activeMeasureType = type
+        val frame = Protocol.buildMeasurementCommand(type, true)
+        val reply = executeCommand(gatt, frame, Protocol.KEY_MEASURE_CONTROL, timeoutMs = 4000L)
+        return reply != null
+    }
+
+    suspend fun stopMeasurementType(gatt: BluetoothGatt, type: Byte): Boolean {
+        isMeasuringActive = false
+        activeMeasureType = null
+        val frame = Protocol.buildMeasurementCommand(type, false)
+        val reply = executeCommand(gatt, frame, Protocol.KEY_MEASURE_CONTROL, timeoutMs = 4000L)
+        return reply != null
+    }
+
+    /**
+     * Executes the ordered probe for ring display ON/OFF:
+     * Tries cachedKey first if valid, else probes candidate keys A..E:
+     *   A) key 0x0306 data [0x00]=off [0x01]=on
+     *   B) key 0x0307 data [0x00]/[0x01]
+     *   C) key 0x0203 data [0x00]/[0x01]
+     *   D) key 0x0204 data [0x00]/[0x01]
+     *   E) key 0x0264 data [0x00]/[0x01]
+     * Stops on first ACK / matching response.
+     * Returns Pair(success, confirmedKey).
+     */
+    suspend fun sendDisplayCommand(
+        gatt: BluetoothGatt,
+        enabled: Boolean,
+        cachedKey: Int?
+    ): Pair<Boolean, Int?> {
+        AppLog.i(tag, "sendDisplayCommand: enabled=$enabled, cachedKey=0x${cachedKey?.let { "%04X".format(it) } ?: "none"}")
+
+        // 1. If cachedKey is present and in candidate list, try it first
+        if (cachedKey != null && cachedKey in Protocol.DISPLAY_CANDIDATE_KEYS) {
+            val frame = Protocol.buildDisplayCommand(cachedKey, enabled)
+            val reply = executeCommand(gatt, frame, cachedKey, timeoutMs = 2500L, maxRetries = 1)
+            if (reply != null) {
+                val hex = reply.fullPayload.joinToString(" ") { "%02X".format(it) }
+                AppLog.i(tag, "Display command SUCCESS using cached key 0x${"%04X".format(cachedKey)}: RX $hex")
+                return Pair(true, cachedKey)
+            }
+            AppLog.w(tag, "Cached display key 0x${"%04X".format(cachedKey)} timed out. Falling back to probe candidate keys...")
+        }
+
+        // 2. Probe candidate keys in order
+        for (candidateKey in Protocol.DISPLAY_CANDIDATE_KEYS) {
+            if (candidateKey == cachedKey) continue // already tried above
+            val frame = Protocol.buildDisplayCommand(candidateKey, enabled)
+            AppLog.i(tag, "Probing display command with key 0x${"%04X".format(candidateKey)} (enabled=$enabled)...")
+            val reply = executeCommand(gatt, frame, candidateKey, timeoutMs = 2500L, maxRetries = 1)
+            if (reply != null) {
+                val hex = reply.fullPayload.joinToString(" ") { "%02X".format(it) }
+                AppLog.i(tag, "Display command PROBE SUCCESS on key 0x${"%04X".format(candidateKey)}! RX: $hex")
+                return Pair(true, candidateKey)
+            }
+        }
+
+        AppLog.w(tag, "Display command probe exhausted: no candidate key confirmed on this firmware.")
+        return Pair(false, null)
     }
 
     // =========================================================================

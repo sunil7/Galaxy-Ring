@@ -47,3 +47,21 @@ data class SleepSessionEntity(
     val sleepEfficiency: Float,
     val stagesJson: String
 )
+
+@Entity(tableName = "hrv_records")
+data class HrvEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val timestamp: Long,
+    val hrvMs: Int,
+    val recordingMethod: String = "MANUAL" // "MANUAL" or "AUTOMATIC"
+)
+
+@Entity(tableName = "stress_records")
+data class StressEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val timestamp: Long,
+    val stressScore: Int,
+    val recordingMethod: String = "MANUAL" // "MANUAL" or "AUTOMATIC"
+)

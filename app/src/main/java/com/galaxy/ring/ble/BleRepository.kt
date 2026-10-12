@@ -22,8 +22,10 @@ import android.os.Looper
 import androidx.core.content.ContextCompat
 import com.galaxy.ring.data.ConnectionState
 import com.galaxy.ring.data.HeartRateSample
+import com.galaxy.ring.data.HrvSample
 import com.galaxy.ring.data.ManualMeasurementState
 import com.galaxy.ring.data.OxygenSaturationSample
+import com.galaxy.ring.data.StressSample
 import com.galaxy.ring.data.RingBattery
 import com.galaxy.ring.data.RingDevice
 import com.galaxy.ring.data.RingHealthRepository
@@ -429,7 +431,13 @@ class BleRepository(
 
                 // Only set Ready if real RX was received during init!
                 _connectionState.value = ConnectionState.Ready(device, rxTotal)
-                AppLog.i(tagBle, "SR16 Ring marked READY. Total RX frames since connect: $rxTotal")
+                AppLog.i(tagBle, "Galaxy Ring marked READY. Total RX frames since connect: $rxTotal")
+
+                // Re-apply ring display setting after each successful init
+                scope.launch {
+                    delay(300)
+                    setRingDisplay(healthRepository.isRingDisplayEnabled)
+                }
 
                 // Automatically trigger sync once after init reaches Ready (debounced 30s)
                 val nowTime = System.currentTimeMillis()
@@ -747,6 +755,345 @@ class BleRepository(
                 )
             }
             null
+        }
+    }
+
+    fun measureHrv() {
+        scope.launch {
+            executeHrvMeasurement(isManual = true)
+        }
+    }
+
+    suspend fun executeHrvMeasurement(isManual: Boolean): HrvSample? {
+        val prereqError = validateMeasurementPrerequisites("HRV")
+        if (prereqError != null) {
+            AppLog.e(tagBle, "Measure HRV rejected: $prereqError")
+            AppLog.lastMeasureResult = "HRV: Error - $prereqError"
+            if (isManual) {
+                _manualMeasurementState.value = ManualMeasurementState.Error(
+                    metric = "HRV",
+                    message = prereqError
+                )
+            }
+            return null
+        }
+
+        val gatt = currentGatt ?: return null
+        return try {
+            if (isManual) {
+                _manualMeasurementState.value = ManualMeasurementState.Measuring("HRV", progress = 0.05f)
+            }
+
+            val cachedType = healthRepository.hrvWorkingType
+            val candidateTypes = if (cachedType != null) {
+                listOf(cachedType) + Protocol.HRV_PROBE_TYPES.filter { it != cachedType }
+            } else {
+                Protocol.HRV_PROBE_TYPES
+            }
+
+            AppLog.i(tagBle, "Measure HRV START (candidates: ${candidateTypes.map { "0x%02X".format(it) }}, cached=0x${cachedType?.let { "%02X".format(it) } ?: "none"})")
+
+            var finalHrvSample: HrvSample? = null
+            var successfulType: Byte? = null
+            var successfulPushKey: Int? = null
+
+            for ((index, type) in candidateTypes.withIndex()) {
+                val isCached = (type == cachedType)
+                val attemptWaitMs = if (isCached) 60000L else 9000L
+                AppLog.i(tagBle, "HRV probe: Starting type 0x${"%02X".format(type)} (candidate ${index + 1}/${candidateTypes.size}, timeout=${attemptWaitMs / 1000}s)...")
+
+                val startOk = bleManager.startMeasurementType(gatt, type)
+                if (!startOk) {
+                    AppLog.w(tagBle, "HRV start command unacknowledged for type 0x${"%02X".format(type)}")
+                    continue
+                }
+
+                var statusCompleteReceived = false
+                var sampleForThisType: HrvSample? = null
+
+                val completionJob = scope.launch {
+                    bleManager.measureCompletedFlow.collect { compType ->
+                        if (compType == type || compType == 0x00.toByte()) {
+                            statusCompleteReceived = true
+                        }
+                    }
+                }
+
+                val frameCollectJob = scope.launch {
+                    bleManager.incomingFrameFlow.collect { frame ->
+                        if (frame.key != Protocol.KEY_HR_PUSH &&
+                            frame.key != Protocol.KEY_SPO2_PUSH &&
+                            frame.key != Protocol.KEY_STEPS_PUSH &&
+                            frame.key != Protocol.KEY_SLEEP_PUSH &&
+                            frame.key != Protocol.KEY_SESSION_INIT &&
+                            frame.key != Protocol.KEY_MEASURE_CONTROL) {
+                            val parsed = Protocol.parseGenericMetricValue(frame, 5, 250)
+                            if (parsed != null) {
+                                AppLog.i(tagBle, "HRV sample parsed: ${parsed.value} from key=0x${"%04X".format(parsed.key)}")
+                                sampleForThisType = HrvSample(hrvMs = parsed.value, timestamp = parsed.timestamp)
+                                successfulPushKey = parsed.key
+                                _snapshot.value = _snapshot.value.copy(latestHrv = sampleForThisType)
+                            }
+                        }
+                    }
+                }
+
+                val pollStepMs = 500L
+                val maxSteps = (attemptWaitMs / pollStepMs).toInt()
+                for (step in 1..maxSteps) {
+                    delay(pollStepMs)
+                    if (sampleForThisType != null) {
+                        finalHrvSample = sampleForThisType
+                        successfulType = type
+                        if (!isCached) {
+                            AppLog.i(tagBle, "HRV probe SUCCESS on type 0x${"%02X".format(type)}! Finishing measurement...")
+                            for (extraStep in 1..30) {
+                                delay(500)
+                                if (statusCompleteReceived || !bleManager.isMeasuringActive) break
+                                if (isManual) {
+                                    val p = (0.3f + (extraStep.toFloat() / 30f) * 0.65f).coerceIn(0.1f, 0.95f)
+                                    _manualMeasurementState.value = ManualMeasurementState.Measuring("HRV", progress = p)
+                                }
+                            }
+                        }
+                        break
+                    }
+                    if (statusCompleteReceived || !bleManager.isMeasuringActive) break
+                    if (isManual) {
+                        val p = ((index.toFloat() + (step.toFloat() / maxSteps)) / candidateTypes.size).coerceIn(0.05f, 0.95f)
+                        _manualMeasurementState.value = ManualMeasurementState.Measuring("HRV", progress = p)
+                    }
+                }
+
+                completionJob.cancel()
+                frameCollectJob.cancel()
+
+                try {
+                    bleManager.stopMeasurementType(gatt, type)
+                } catch (e: Exception) {
+                    AppLog.w(tagBle, "Error stopping HRV measurement type 0x${"%02X".format(type)}: ${e.message}")
+                }
+
+                if (finalHrvSample != null) break
+            }
+
+            if (finalHrvSample != null && successfulType != null) {
+                healthRepository.hrvWorkingType = successfulType
+                if (successfulPushKey != null) {
+                    healthRepository.hrvWorkingPushKey = successfulPushKey
+                }
+                healthRepository.saveHrv(hrvMs = finalHrvSample.hrvMs, timestamp = finalHrvSample.timestamp, isManual = isManual)
+                val displayStr = "${finalHrvSample.hrvMs} ms"
+                if (isManual) {
+                    _manualMeasurementState.value = ManualMeasurementState.Success(
+                        metric = "HRV",
+                        displayValue = displayStr,
+                        timestamp = finalHrvSample.timestamp
+                    )
+                }
+                AppLog.lastMeasureResult = "HRV: $displayStr (Success, isManual=$isManual, type=0x${"%02X".format(successfulType)})"
+                AppLog.i(tagBle, "HRV measurement succeeded: $displayStr (single row saved)")
+                finalHrvSample
+            } else {
+                val errMsg = "HRV not supported / no RX — export logs"
+                AppLog.w(tagBle, "HRV measurement ended without reading: $errMsg")
+                AppLog.lastMeasureResult = "HRV: Error - $errMsg"
+                if (isManual) {
+                    _manualMeasurementState.value = ManualMeasurementState.Error(
+                        metric = "HRV",
+                        message = errMsg
+                    )
+                }
+                null
+            }
+        } catch (e: Exception) {
+            AppLog.e(tagBle, "Exception in executeHrvMeasurement: ${e.message}", e)
+            if (isManual) {
+                _manualMeasurementState.value = ManualMeasurementState.Error(
+                    metric = "HRV",
+                    message = "Error: ${e.message ?: "Measurement failed"}"
+                )
+            }
+            null
+        }
+    }
+
+    fun measureStress() {
+        scope.launch {
+            executeStressMeasurement(isManual = true)
+        }
+    }
+
+    suspend fun executeStressMeasurement(isManual: Boolean): StressSample? {
+        val prereqError = validateMeasurementPrerequisites("Stress")
+        if (prereqError != null) {
+            AppLog.e(tagBle, "Measure Stress rejected: $prereqError")
+            AppLog.lastMeasureResult = "Stress: Error - $prereqError"
+            if (isManual) {
+                _manualMeasurementState.value = ManualMeasurementState.Error(
+                    metric = "Stress",
+                    message = prereqError
+                )
+            }
+            return null
+        }
+
+        val gatt = currentGatt ?: return null
+        return try {
+            if (isManual) {
+                _manualMeasurementState.value = ManualMeasurementState.Measuring("Stress", progress = 0.05f)
+            }
+
+            val cachedType = healthRepository.stressWorkingType
+            val candidateTypes = if (cachedType != null) {
+                listOf(cachedType) + Protocol.getStressCandidateTypes(healthRepository.hrvWorkingType).filter { it != cachedType }
+            } else {
+                Protocol.getStressCandidateTypes(healthRepository.hrvWorkingType)
+            }
+
+            AppLog.i(tagBle, "Measure Stress START (candidates: ${candidateTypes.map { "0x%02X".format(it) }}, cached=0x${cachedType?.let { "%02X".format(it) } ?: "none"})")
+
+            var finalStressSample: StressSample? = null
+            var successfulType: Byte? = null
+            var successfulPushKey: Int? = null
+
+            for ((index, type) in candidateTypes.withIndex()) {
+                val isCached = (type == cachedType)
+                val attemptWaitMs = if (isCached) 60000L else 9000L
+                AppLog.i(tagBle, "Stress probe: Starting type 0x${"%02X".format(type)} (candidate ${index + 1}/${candidateTypes.size}, timeout=${attemptWaitMs / 1000}s)...")
+
+                val startOk = bleManager.startMeasurementType(gatt, type)
+                if (!startOk) {
+                    AppLog.w(tagBle, "Stress start command unacknowledged for type 0x${"%02X".format(type)}")
+                    continue
+                }
+
+                var statusCompleteReceived = false
+                var sampleForThisType: StressSample? = null
+
+                val completionJob = scope.launch {
+                    bleManager.measureCompletedFlow.collect { compType ->
+                        if (compType == type || compType == 0x00.toByte()) {
+                            statusCompleteReceived = true
+                        }
+                    }
+                }
+
+                val frameCollectJob = scope.launch {
+                    bleManager.incomingFrameFlow.collect { frame ->
+                        if (frame.key != Protocol.KEY_HR_PUSH &&
+                            frame.key != Protocol.KEY_SPO2_PUSH &&
+                            frame.key != Protocol.KEY_STEPS_PUSH &&
+                            frame.key != Protocol.KEY_SLEEP_PUSH &&
+                            frame.key != Protocol.KEY_SESSION_INIT &&
+                            frame.key != Protocol.KEY_MEASURE_CONTROL) {
+                            val parsed = Protocol.parseGenericMetricValue(frame, 0, 100)
+                            if (parsed != null) {
+                                AppLog.i(tagBle, "Stress sample parsed: ${parsed.value} from key=0x${"%04X".format(parsed.key)}")
+                                sampleForThisType = StressSample(score = parsed.value, timestamp = parsed.timestamp)
+                                successfulPushKey = parsed.key
+                                _snapshot.value = _snapshot.value.copy(latestStress = sampleForThisType)
+                            }
+                        }
+                    }
+                }
+
+                val pollStepMs = 500L
+                val maxSteps = (attemptWaitMs / pollStepMs).toInt()
+                for (step in 1..maxSteps) {
+                    delay(pollStepMs)
+                    if (sampleForThisType != null) {
+                        finalStressSample = sampleForThisType
+                        successfulType = type
+                        if (!isCached) {
+                            AppLog.i(tagBle, "Stress probe SUCCESS on type 0x${"%02X".format(type)}! Finishing measurement...")
+                            for (extraStep in 1..30) {
+                                delay(500)
+                                if (statusCompleteReceived || !bleManager.isMeasuringActive) break
+                                if (isManual) {
+                                    val p = (0.3f + (extraStep.toFloat() / 30f) * 0.65f).coerceIn(0.1f, 0.95f)
+                                    _manualMeasurementState.value = ManualMeasurementState.Measuring("Stress", progress = p)
+                                }
+                            }
+                        }
+                        break
+                    }
+                    if (statusCompleteReceived || !bleManager.isMeasuringActive) break
+                    if (isManual) {
+                        val p = ((index.toFloat() + (step.toFloat() / maxSteps)) / candidateTypes.size).coerceIn(0.05f, 0.95f)
+                        _manualMeasurementState.value = ManualMeasurementState.Measuring("Stress", progress = p)
+                    }
+                }
+
+                completionJob.cancel()
+                frameCollectJob.cancel()
+
+                try {
+                    bleManager.stopMeasurementType(gatt, type)
+                } catch (e: Exception) {
+                    AppLog.w(tagBle, "Error stopping Stress measurement type 0x${"%02X".format(type)}: ${e.message}")
+                }
+
+                if (finalStressSample != null) break
+            }
+
+            if (finalStressSample != null && successfulType != null) {
+                healthRepository.stressWorkingType = successfulType
+                if (successfulPushKey != null) {
+                    healthRepository.stressWorkingPushKey = successfulPushKey
+                }
+                healthRepository.saveStress(stressScore = finalStressSample.score, timestamp = finalStressSample.timestamp, isManual = isManual)
+                val displayStr = "${finalStressSample.score}/100 (${finalStressSample.label})"
+                if (isManual) {
+                    _manualMeasurementState.value = ManualMeasurementState.Success(
+                        metric = "Stress",
+                        displayValue = displayStr,
+                        timestamp = finalStressSample.timestamp
+                    )
+                }
+                AppLog.lastMeasureResult = "Stress: $displayStr (Success, isManual=$isManual, type=0x${"%02X".format(successfulType)})"
+                AppLog.i(tagBle, "Stress measurement succeeded: $displayStr (single row saved)")
+                finalStressSample
+            } else {
+                val errMsg = "Stress not supported / no RX — export logs"
+                AppLog.w(tagBle, "Stress measurement ended without reading: $errMsg")
+                AppLog.lastMeasureResult = "Stress: Error - $errMsg"
+                if (isManual) {
+                    _manualMeasurementState.value = ManualMeasurementState.Error(
+                        metric = "Stress",
+                        message = errMsg
+                    )
+                }
+                null
+            }
+        } catch (e: Exception) {
+            AppLog.e(tagBle, "Exception in executeStressMeasurement: ${e.message}", e)
+            if (isManual) {
+                _manualMeasurementState.value = ManualMeasurementState.Error(
+                    metric = "Stress",
+                    message = "Error: ${e.message ?: "Measurement failed"}"
+                )
+            }
+            null
+        }
+    }
+
+    suspend fun setRingDisplay(enabled: Boolean): Boolean {
+        healthRepository.isRingDisplayEnabled = enabled
+        val gatt = currentGatt
+        val state = _connectionState.value
+        if (gatt == null || state !is ConnectionState.Ready) {
+            AppLog.i(tagBle, "Ring display preference set to $enabled (ring not currently Ready; will apply upon connect)")
+            return true
+        }
+        val (success, confirmedKey) = bleManager.sendDisplayCommand(gatt, enabled, healthRepository.displayCommandKey)
+        if (success && confirmedKey != null) {
+            healthRepository.displayCommandKey = confirmedKey
+            AppLog.i(tagBle, "Ring display set to $enabled (confirmed key=0x${"%04X".format(confirmedKey)})")
+            return true
+        } else {
+            AppLog.w(tagBle, "Display command not confirmed on this firmware — export Admin logs")
+            return false
         }
     }
 

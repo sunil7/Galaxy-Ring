@@ -100,15 +100,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.SelfImprovement
+import androidx.compose.material.icons.filled.Timeline
 import com.galaxy.ring.GalaxyRingApp
 import com.galaxy.ring.data.ConnectionState
 import com.galaxy.ring.data.HeartRateSample
+import com.galaxy.ring.data.HrvSample
 import com.galaxy.ring.data.ManualMeasurementState
 import com.galaxy.ring.data.OxygenSaturationSample
 import com.galaxy.ring.data.RingDevice
 import com.galaxy.ring.data.RingHealthSnapshot
 import com.galaxy.ring.data.SleepSession
 import com.galaxy.ring.data.SleepStage
+import com.galaxy.ring.data.StressSample
 import com.galaxy.ring.data.SyncStatus
 import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
@@ -276,6 +281,12 @@ fun MainScreen(
                         onMeasureSpo2 = {
                             bleRepo.measureOxygenSaturation()
                         },
+                        onMeasureHrv = {
+                            bleRepo.measureHrv()
+                        },
+                        onMeasureStress = {
+                            bleRepo.measureStress()
+                        },
                         onSyncNow = handleSyncFromRing,
                         onSyncFromRing = handleSyncFromRing,
                         isSyncing = isSyncing,
@@ -357,6 +368,8 @@ fun DeviceDashboard(
     onConnectClick: () -> Unit,
     onMeasureHeartRate: () -> Unit,
     onMeasureSpo2: () -> Unit,
+    onMeasureHrv: () -> Unit,
+    onMeasureStress: () -> Unit,
     onSyncNow: () -> Unit,
     onSyncFromRing: () -> Unit = onSyncNow,
     isSyncing: Boolean = false,
@@ -409,15 +422,19 @@ fun DeviceDashboard(
             )
         }
 
-        // 3. Two Prominent Manual Measurement Buttons (Heart Rate & SpO₂)
+        // 3. Four Prominent Manual Measurement Buttons (Heart Rate, SpO₂, HRV, Stress)
         item {
             ManualMeasurementsCard(
                 isReady = isReady,
                 measurementState = measurementState,
                 latestHeartRate = snapshot.latestHeartRate,
                 latestSpo2 = snapshot.latestOxygenSaturation,
+                latestHrv = snapshot.latestHrv,
+                latestStress = snapshot.latestStress,
                 onMeasureHeartRate = onMeasureHeartRate,
                 onMeasureSpo2 = onMeasureSpo2,
+                onMeasureHrv = onMeasureHrv,
+                onMeasureStress = onMeasureStress,
                 onOpenAdmin = onOpenAdmin
             )
         }
@@ -455,6 +472,22 @@ fun DeviceDashboard(
             Spo2Card(
                 latestSample = snapshot.latestOxygenSaturation,
                 history = snapshot.oxygenSaturationHistory
+            )
+        }
+
+        // 7b. HRV Card
+        item {
+            HrvCard(
+                latestSample = snapshot.latestHrv,
+                history = snapshot.hrvHistory
+            )
+        }
+
+        // 7c. Stress Card
+        item {
+            StressCard(
+                latestSample = snapshot.latestStress,
+                history = snapshot.stressHistory
             )
         }
 
@@ -534,7 +567,7 @@ fun ConnectionStatusBanner(
             CyberCyan.copy(alpha = 0.15f),
             CyberCyan,
             Icons.Default.Refresh,
-            "Scanning for Galaxy Ring / SR16..."
+            "Scanning for Galaxy Ring..."
         )
         is ConnectionState.Error -> Quadruple(
             RosePulse.copy(alpha = 0.15f),
@@ -596,8 +629,12 @@ fun ManualMeasurementsCard(
     measurementState: ManualMeasurementState,
     latestHeartRate: HeartRateSample,
     latestSpo2: OxygenSaturationSample?,
+    latestHrv: HrvSample? = null,
+    latestStress: StressSample? = null,
     onMeasureHeartRate: () -> Unit,
     onMeasureSpo2: () -> Unit,
+    onMeasureHrv: () -> Unit,
+    onMeasureStress: () -> Unit,
     onOpenAdmin: () -> Unit = {}
 ) {
     Card(
@@ -734,46 +771,96 @@ fun ManualMeasurementsCard(
                 Spacer(modifier = Modifier.height(14.dp))
             }
 
-            // Two Prominent Action Buttons
-            Row(
+            // Four Prominent Action Buttons (HR, SpO2, HRV, Stress)
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                val isHrMeasuring = measurementState is ManualMeasurementState.Measuring && measurementState.metric == "Heart Rate"
-                Button(
-                    onClick = onMeasureHeartRate,
-                    enabled = isReady && measurementState !is ManualMeasurementState.Measuring,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("measure_heart_rate_button"),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = RosePulse)
+                // Row 1: HR & SpO2
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    if (isHrMeasuring) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
-                    } else {
-                        Icon(imageVector = Icons.Default.Favorite, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Measure HR", fontWeight = FontWeight.Bold)
+                    val isHrMeasuring = measurementState is ManualMeasurementState.Measuring && measurementState.metric == "Heart Rate"
+                    Button(
+                        onClick = onMeasureHeartRate,
+                        enabled = isReady && measurementState !is ManualMeasurementState.Measuring,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("measure_heart_rate_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = RosePulse)
+                    ) {
+                        if (isHrMeasuring) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                        } else {
+                            Icon(imageVector = Icons.Default.Favorite, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Measure HR", fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    val isSpo2Measuring = measurementState is ManualMeasurementState.Measuring && measurementState.metric == "SpO₂"
+                    Button(
+                        onClick = onMeasureSpo2,
+                        enabled = isReady && measurementState !is ManualMeasurementState.Measuring,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("measure_spo2_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                    ) {
+                        if (isSpo2Measuring) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color(0xFF0F172A), strokeWidth = 2.dp)
+                        } else {
+                            Icon(imageVector = Icons.Default.Bloodtype, contentDescription = null, tint = Color(0xFF0F172A), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Measure SpO₂", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
 
-                val isSpo2Measuring = measurementState is ManualMeasurementState.Measuring && measurementState.metric == "SpO₂"
-                Button(
-                    onClick = onMeasureSpo2,
-                    enabled = isReady && measurementState !is ManualMeasurementState.Measuring,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("measure_spo2_button"),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                // Row 2: HRV & Stress
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    if (isSpo2Measuring) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color(0xFF0F172A), strokeWidth = 2.dp)
-                    } else {
-                        Icon(imageVector = Icons.Default.Bloodtype, contentDescription = null, tint = Color(0xFF0F172A), modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Measure SpO₂", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                    val isHrvMeasuring = measurementState is ManualMeasurementState.Measuring && measurementState.metric == "HRV"
+                    Button(
+                        onClick = onMeasureHrv,
+                        enabled = isReady && measurementState !is ManualMeasurementState.Measuring,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("measure_hrv_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = ElectricViolet)
+                    ) {
+                        if (isHrvMeasuring) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                        } else {
+                            Icon(imageVector = Icons.Default.Timeline, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Measure HRV", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    val isStressMeasuring = measurementState is ManualMeasurementState.Measuring && measurementState.metric == "Stress"
+                    Button(
+                        onClick = onMeasureStress,
+                        enabled = isReady && measurementState !is ManualMeasurementState.Measuring,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("measure_stress_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B))
+                    ) {
+                        if (isStressMeasuring) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color(0xFF0F172A), strokeWidth = 2.dp)
+                        } else {
+                            Icon(imageVector = Icons.Default.SelfImprovement, contentDescription = null, tint = Color(0xFF0F172A), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Measure Stress", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -1020,6 +1107,240 @@ fun Spo2Card(
     }
 }
 
+@Composable
+fun HrvCard(
+    latestSample: HrvSample?,
+    history: List<HrvSample>
+) {
+    val hasSample = latestSample != null
+    val hrvVal = if (hasSample) latestSample!!.hrvMs else 0
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Timeline,
+                        contentDescription = "HRV",
+                        tint = ElectricViolet,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Heart Rate Variability (HRV)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Text(
+                    text = "RMSSD / ms",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (hasSample) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = "$hrvVal",
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "ms",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = ElectricViolet,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    val statusLabel = when {
+                        hrvVal >= 50 -> "High Recovery"
+                        hrvVal >= 30 -> "Normal"
+                        else -> "Elevated Fatigue"
+                    }
+                    val statusColor = when {
+                        hrvVal >= 50 -> NeonEmerald
+                        hrvVal >= 30 -> CyberCyan
+                        else -> Color(0xFFF59E0B)
+                    }
+                    Text(
+                        text = statusLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = statusColor,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(statusColor.copy(alpha = 0.15f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                LinearProgressIndicator(
+                    progress = { (hrvVal / 150f).coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp)),
+                    color = ElectricViolet,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            } else {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = "--",
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "ms",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "No HRV recordings yet • Tap Measure HRV below",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun StressCard(
+    latestSample: StressSample?,
+    history: List<StressSample>
+) {
+    val hasSample = latestSample != null
+    val score = if (hasSample) latestSample!!.score else 0
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.SelfImprovement,
+                        contentDescription = "Stress",
+                        tint = Color(0xFFF59E0B),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Stress Level",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Text(
+                    text = "Range: 0–100",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (hasSample) {
+                val label = latestSample!!.label
+                val statusColor = when {
+                    score <= 29 -> NeonEmerald
+                    score <= 59 -> CyberCyan
+                    score <= 79 -> Color(0xFFF59E0B)
+                    else -> RosePulse
+                }
+
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = "$score",
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "/100",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = Color(0xFFF59E0B),
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = statusColor,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(statusColor.copy(alpha = 0.15f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                LinearProgressIndicator(
+                    progress = { (score / 100f).coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp)),
+                    color = statusColor,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            } else {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = "--",
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "/100",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "No stress recordings yet • Tap Measure Stress below",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalaxyRingTopBar(
@@ -1257,7 +1578,7 @@ fun RingHeroCard(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (isConnected) "SR16 Active" else "No Ring",
+                        text = if (isConnected) "Galaxy Ring Active" else "No Ring",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1267,7 +1588,7 @@ fun RingHeroCard(
             Spacer(modifier = Modifier.height(10.dp))
 
             Text(
-                text = if (isConnected) "Galaxy Ring / SR16 Smart Ring" else "Galaxy Ring Not Connected",
+                text = if (isConnected) "Galaxy Ring" else "Galaxy Ring Not Connected",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -1977,7 +2298,7 @@ fun ScanDevicesSheetContent(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = if (isScanning) "Searching for SR16 / Galaxy Ring..." else "No devices found. Tap refresh to scan again.",
+                    text = if (isScanning) "Searching for Galaxy Ring..." else "No devices found. Tap refresh to scan again.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -2004,7 +2325,8 @@ fun ScanDevicesSheetContent(
                         ) {
                             Column {
                                 val safeDisplayName = try {
-                                    dev.name.ifEmpty { dev.address }
+                                    if (dev.name.contains("SR16", ignoreCase = true)) "Galaxy Ring"
+                                    else dev.name.ifEmpty { dev.address }
                                 } catch (_: Exception) {
                                     dev.address
                                 }

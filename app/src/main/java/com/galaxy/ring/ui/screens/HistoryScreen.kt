@@ -71,6 +71,8 @@ import com.galaxy.ring.data.DailyStepsEntity
 import com.galaxy.ring.data.HeartRateEntity
 import com.galaxy.ring.data.OxygenSaturationEntity
 import com.galaxy.ring.data.SleepSessionEntity
+import com.galaxy.ring.data.HrvEntity
+import com.galaxy.ring.data.StressEntity
 import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
 import com.galaxy.ring.ui.theme.NeonEmerald
@@ -106,9 +108,11 @@ fun HistoryScreen(
     val daySteps by repo.getDailySteps(selectedDateStr).collectAsState(initial = null)
     val dayHrSamples by repo.getHeartRateForDay(selectedCalendar.time).collectAsState(initial = emptyList())
     val daySpo2Samples by repo.getSpo2ForDay(selectedCalendar.time).collectAsState(initial = emptyList())
+    val dayHrvSamples by repo.getHrvForDay(selectedCalendar.time).collectAsState(initial = emptyList())
+    val dayStressSamples by repo.getStressForDay(selectedCalendar.time).collectAsState(initial = emptyList())
     val daySleep by repo.getSleepForDate(selectedDateStr).collectAsState(initial = null)
 
-    Log.d(TAG, "Displaying history for $selectedDateStr: HR=${dayHrSamples.size}, SpO2=${daySpo2Samples.size}, interval=${scheduleInterval}m")
+    Log.d(TAG, "Displaying history for $selectedDateStr: HR=${dayHrSamples.size}, SpO2=${daySpo2Samples.size}, HRV=${dayHrvSamples.size}, Stress=${dayStressSamples.size}")
 
     LazyColumn(
         modifier = Modifier
@@ -203,6 +207,22 @@ fun HistoryScreen(
             Spo2DayTimelineCard(
                 samples = daySpo2Samples,
                 scheduleIntervalMinutes = scheduleInterval,
+                selectedCalendar = selectedCalendar
+            )
+        }
+
+        // 4b. HRV Day Timeline Card
+        item {
+            HrvDayTimelineCard(
+                samples = dayHrvSamples,
+                selectedCalendar = selectedCalendar
+            )
+        }
+
+        // 4c. Stress Day Timeline Card
+        item {
+            StressDayTimelineCard(
+                samples = dayStressSamples,
                 selectedCalendar = selectedCalendar
             )
         }
@@ -1173,3 +1193,361 @@ fun MetricPill(label: String, value: String, unit: String, color: Color) {
         }
     }
 }
+
+@Composable
+fun HrvDayTimelineCard(
+    samples: List<HrvEntity>,
+    selectedCalendar: Calendar
+) {
+    var showTimelineList by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(ElectricViolet.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Timeline,
+                            contentDescription = null,
+                            tint = ElectricViolet,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "HRV (Heart Rate Variability)",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Root Mean Square of Successive Differences (ms)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = CyberCyan
+                        )
+                    }
+                }
+
+                Text(
+                    text = "${samples.size} samples",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            if (samples.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.ShowChart,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "No HRV data for this day",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Tap 'Measure HRV' on the Device dashboard",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            } else {
+                val minHrv = samples.minOf { it.hrvMs }
+                val avgHrv = samples.map { it.hrvMs }.average().toInt()
+                val maxHrv = samples.maxOf { it.hrvMs }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceAround
+                ) {
+                    MetricPill(label = "Min", value = "$minHrv", unit = "ms", color = RosePulse)
+                    MetricPill(label = "Avg", value = "$avgHrv", unit = "ms", color = CyberCyan)
+                    MetricPill(label = "Max", value = "$maxHrv", unit = "ms", color = NeonEmerald)
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { showTimelineList = !showTimelineList }
+                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Timeline,
+                            contentDescription = null,
+                            tint = CyberCyan,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (showTimelineList) "Hide Sample Readings" else "View Timeline Readings (${samples.size})",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = CyberCyan
+                        )
+                    }
+                    Icon(
+                        imageVector = if (showTimelineList) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = CyberCyan,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                AnimatedVisibility(visible = showTimelineList) {
+                    Column(
+                        modifier = Modifier.padding(top = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        samples.reversed().forEach { sample ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = SimpleDateFormat("h:mm:ss a", Locale.US).format(Date(sample.timestamp)),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "${sample.hrvMs} ms (${sample.recordingMethod})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ElectricViolet
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StressDayTimelineCard(
+    samples: List<StressEntity>,
+    selectedCalendar: Calendar
+) {
+    var showTimelineList by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFF59E0B).copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Timeline,
+                            contentDescription = null,
+                            tint = Color(0xFFF59E0B),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Stress Level",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Real-time autonomic stress index (0–100)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = CyberCyan
+                        )
+                    }
+                }
+
+                Text(
+                    text = "${samples.size} samples",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            if (samples.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.ShowChart,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "No stress data for this day",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Tap 'Measure Stress' on the Device dashboard",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            } else {
+                val minStress = samples.minOf { it.stressScore }
+                val avgStress = samples.map { it.stressScore }.average().toInt()
+                val maxStress = samples.maxOf { it.stressScore }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceAround
+                ) {
+                    MetricPill(label = "Min", value = "$minStress", unit = "", color = NeonEmerald)
+                    MetricPill(label = "Avg", value = "$avgStress", unit = "", color = CyberCyan)
+                    MetricPill(label = "Max", value = "$maxStress", unit = "", color = Color(0xFFF59E0B))
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { showTimelineList = !showTimelineList }
+                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Timeline,
+                            contentDescription = null,
+                            tint = CyberCyan,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (showTimelineList) "Hide Sample Readings" else "View Timeline Readings (${samples.size})",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = CyberCyan
+                        )
+                    }
+                    Icon(
+                        imageVector = if (showTimelineList) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = CyberCyan,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                AnimatedVisibility(visible = showTimelineList) {
+                    Column(
+                        modifier = Modifier.padding(top = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        samples.reversed().forEach { sample ->
+                            val label = when {
+                                sample.stressScore <= 29 -> "Low"
+                                sample.stressScore <= 59 -> "Normal"
+                                sample.stressScore <= 79 -> "Medium"
+                                else -> "High"
+                            }
+                            val tagColor = when {
+                                sample.stressScore <= 29 -> NeonEmerald
+                                sample.stressScore <= 59 -> CyberCyan
+                                sample.stressScore <= 79 -> Color(0xFFF59E0B)
+                                else -> RosePulse
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = SimpleDateFormat("h:mm:ss a", Locale.US).format(Date(sample.timestamp)),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "${sample.stressScore}/100 ($label)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = tagColor
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

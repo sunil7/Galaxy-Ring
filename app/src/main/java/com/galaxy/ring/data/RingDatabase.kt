@@ -10,9 +10,11 @@ import androidx.room.RoomDatabase
         HeartRateEntity::class,
         OxygenSaturationEntity::class,
         DailyStepsEntity::class,
-        SleepSessionEntity::class
+        SleepSessionEntity::class,
+        HrvEntity::class,
+        StressEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class RingDatabase : RoomDatabase() {
@@ -21,6 +23,8 @@ abstract class RingDatabase : RoomDatabase() {
     abstract fun oxygenSaturationDao(): OxygenSaturationDao
     abstract fun dailyStepsDao(): DailyStepsDao
     abstract fun sleepDao(): SleepDao
+    abstract fun hrvDao(): HrvDao
+    abstract fun stressDao(): StressDao
 
     companion object {
         @Volatile

@@ -155,22 +155,22 @@ object AppLog {
     }
 
     fun d(tag: String, message: String) {
-        Log.d(tag, message)
+        try { Log.d(tag, message) } catch (_: Throwable) {}
         appendEntry("D", tag, message, null)
     }
 
     fun i(tag: String, message: String) {
-        Log.i(tag, message)
+        try { Log.i(tag, message) } catch (_: Throwable) {}
         appendEntry("I", tag, message, null)
     }
 
     fun w(tag: String, message: String) {
-        Log.w(tag, message)
+        try { Log.w(tag, message) } catch (_: Throwable) {}
         appendEntry("W", tag, message, null)
     }
 
     fun e(tag: String, message: String, throwable: Throwable? = null) {
-        Log.e(tag, message, throwable)
+        try { Log.e(tag, message, throwable) } catch (_: Throwable) {}
         val snippet = throwable?.let {
             val sw = java.io.StringWriter()
             val pw = java.io.PrintWriter(sw)

@@ -377,5 +377,88 @@ class ProtocolTest {
         assertNotNull(sleep)
         assertEquals(480L, sleep?.durationMinutes)
     }
+
+    @Test
+    fun testBuildDisplayCommand() {
+        // Test ON (0x01) and OFF (0x00) for candidates
+        val cmdOn = Protocol.buildDisplayCommand(0x0306, true)
+        val parsedOn = Protocol.parseFramesFromStream(cmdOn).first[0]
+        assertEquals(0x0306, parsedOn.key)
+        assertEquals(Protocol.KEY_FLAG_WRITE, parsedOn.keyFlag)
+        assertArrayEquals(byteArrayOf(0x01), parsedOn.data)
+
+        val cmdOff = Protocol.buildDisplayCommand(0x0306, false)
+        val parsedOff = Protocol.parseFramesFromStream(cmdOff).first[0]
+        assertEquals(0x0306, parsedOff.key)
+        assertEquals(Protocol.KEY_FLAG_WRITE, parsedOff.keyFlag)
+        assertArrayEquals(byteArrayOf(0x00), parsedOff.data)
+    }
+
+    @Test
+    fun testBuildHrvAndStressCommands() {
+        // HRV type 0x04 start: data should be [0x04, 0x05, 0x01]
+        val hrvStart = Protocol.buildHrvStartCommand(0x04.toByte())
+        val fHrvStart = Protocol.parseFramesFromStream(hrvStart).first[0]
+        assertEquals(Protocol.KEY_MEASURE_CONTROL, fHrvStart.key)
+        assertArrayEquals(byteArrayOf(0x04, 0x05, 0x01), fHrvStart.data)
+
+        // HRV type 0x04 stop: data should be [0x04, 0x05, 0x00]
+        val hrvStop = Protocol.buildHrvStopCommand(0x04.toByte())
+        val fHrvStop = Protocol.parseFramesFromStream(hrvStop).first[0]
+        assertEquals(Protocol.KEY_MEASURE_CONTROL, fHrvStop.key)
+        assertArrayEquals(byteArrayOf(0x04, 0x05, 0x00), fHrvStop.data)
+
+        // Stress type 0x07 start: data should be [0x07, 0x05, 0x01]
+        val stressStart = Protocol.buildStressStartCommand(0x07.toByte())
+        val fStressStart = Protocol.parseFramesFromStream(stressStart).first[0]
+        assertEquals(Protocol.KEY_MEASURE_CONTROL, fStressStart.key)
+        assertArrayEquals(byteArrayOf(0x07, 0x05, 0x01), fStressStart.data)
+    }
+
+    @Test
+    fun testParseGenericMetricHrvAndStress() {
+        // Generic push frame layout: key(2) + keyFlag(1) + timestamp(4 BE) + value(1)
+        // e.g. key 0x0280, timestamp 4 bytes, value 65 ms
+        val timestampBytes = byteArrayOf(0x00, 0x12, 0x34, 0x56)
+        val frameHrv = Protocol.Frame(
+            flag = Protocol.FLAG_PUSH,
+            key = 0x0280,
+            keyFlag = 0x00,
+            data = timestampBytes + byteArrayOf(65.toByte()),
+            fullPayload = byteArrayOf(0x02, 0x80.toByte(), 0x00) + timestampBytes + byteArrayOf(65.toByte()),
+            crcOk = true
+        )
+        val parsedHrv = Protocol.parseGenericMetricValue(frameHrv, 5, 250)
+        assertNotNull(parsedHrv)
+        assertEquals(65, parsedHrv?.value)
+        assertEquals(0x0280, parsedHrv?.key)
+
+        // Stress: score 42 in 0..100
+        val frameStress = Protocol.Frame(
+            flag = Protocol.FLAG_PUSH,
+            key = 0x0281,
+            keyFlag = 0x00,
+            data = timestampBytes + byteArrayOf(42.toByte()),
+            fullPayload = byteArrayOf(0x02, 0x81.toByte(), 0x00) + timestampBytes + byteArrayOf(42.toByte()),
+            crcOk = true
+        )
+        val parsedStress = Protocol.parseGenericMetricValue(frameStress, 0, 100)
+        assertNotNull(parsedStress)
+        assertEquals(42, parsedStress?.value)
+        assertEquals(0x0281, parsedStress?.key)
+    }
+
+    @Test
+    fun testCandidateProbesExclusion() {
+        // HR 0x03 and SpO2 0x09 must NOT be in HRV probe types
+        assertFalse(Protocol.HRV_PROBE_TYPES.contains(0x03.toByte()))
+        assertFalse(Protocol.HRV_PROBE_TYPES.contains(0x09.toByte()))
+
+        // Stress candidates with claimed HRV type 0x04 should exclude 0x04
+        val stressCandidates = Protocol.getStressCandidateTypes(0x04.toByte())
+        assertFalse(stressCandidates.contains(0x04.toByte()))
+        assertFalse(stressCandidates.contains(0x03.toByte()))
+        assertFalse(stressCandidates.contains(0x09.toByte()))
+    }
 }
 

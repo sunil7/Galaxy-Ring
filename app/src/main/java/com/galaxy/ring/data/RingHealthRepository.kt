@@ -17,6 +17,8 @@ class RingHealthRepository(private val context: Context) {
     private val spo2Dao = database.oxygenSaturationDao()
     private val stepsDao = database.dailyStepsDao()
     private val sleepDao = database.sleepDao()
+    private val hrvDao = database.hrvDao()
+    private val stressDao = database.stressDao()
 
     private val prefs: SharedPreferences =
         context.getSharedPreferences("galaxy_ring_prefs", Context.MODE_PRIVATE)
@@ -85,6 +87,49 @@ class RingHealthRepository(private val context: Context) {
         get() = prefs.getBoolean("apnea_observed_pauses", false)
         set(value) = prefs.edit().putBoolean("apnea_observed_pauses", value).apply()
 
+    // Ring display ON/OFF toggle (default ON = true)
+    var isRingDisplayEnabled: Boolean
+        get() = prefs.getBoolean("ring_display_enabled", true)
+        set(value) = prefs.edit().putBoolean("ring_display_enabled", value).apply()
+
+    // Cached confirmed key for ring display toggle
+    var displayCommandKey: Int?
+        get() = if (prefs.contains("display_command_key")) prefs.getInt("display_command_key", -1).takeIf { it != -1 } else null
+        set(value) {
+            if (value != null) prefs.edit().putInt("display_command_key", value).apply()
+            else prefs.edit().remove("display_command_key").apply()
+        }
+
+    // Cached confirmed measurement type & push key for HRV
+    var hrvWorkingType: Byte?
+        get() = if (prefs.contains("hrv_working_type")) prefs.getInt("hrv_working_type", -1).takeIf { it != -1 }?.toByte() else null
+        set(value) {
+            if (value != null) prefs.edit().putInt("hrv_working_type", value.toInt() and 0xFF).apply()
+            else prefs.edit().remove("hrv_working_type").apply()
+        }
+
+    var hrvWorkingPushKey: Int?
+        get() = if (prefs.contains("hrv_working_push_key")) prefs.getInt("hrv_working_push_key", -1).takeIf { it != -1 } else null
+        set(value) {
+            if (value != null) prefs.edit().putInt("hrv_working_push_key", value).apply()
+            else prefs.edit().remove("hrv_working_push_key").apply()
+        }
+
+    // Cached confirmed measurement type & push key for Stress
+    var stressWorkingType: Byte?
+        get() = if (prefs.contains("stress_working_type")) prefs.getInt("stress_working_type", -1).takeIf { it != -1 }?.toByte() else null
+        set(value) {
+            if (value != null) prefs.edit().putInt("stress_working_type", value.toInt() and 0xFF).apply()
+            else prefs.edit().remove("stress_working_type").apply()
+        }
+
+    var stressWorkingPushKey: Int?
+        get() = if (prefs.contains("stress_working_push_key")) prefs.getInt("stress_working_push_key", -1).takeIf { it != -1 } else null
+        set(value) {
+            if (value != null) prefs.edit().putInt("stress_working_push_key", value).apply()
+            else prefs.edit().remove("stress_working_push_key").apply()
+        }
+
     /**
      * Saves a single Heart Rate sample to Room DB.
      * Safety net: If a sample exists within +-60s, updates that row instead of inserting a duplicate.
@@ -132,6 +177,56 @@ class RingHealthRepository(private val context: Context) {
             )
             spo2Dao.insert(entity)
             AppLog.d(tag, "Saved SpO2 sample to Room: $percentage% (manual=$isManual)")
+        }
+    }
+
+    /**
+     * Saves a single HRV sample to Room DB.
+     * Safety net: If a sample exists within +-60s, updates that row instead of inserting a duplicate.
+     */
+    suspend fun saveHrv(hrvMs: Int, timestamp: Long = System.currentTimeMillis(), isManual: Boolean = false) {
+        val existing = hrvDao.findSampleBetween(timestamp - 60000L, timestamp + 60000L)
+        if (existing != null) {
+            val updated = existing.copy(
+                timestamp = timestamp,
+                hrvMs = hrvMs,
+                recordingMethod = if (isManual) "MANUAL" else "AUTOMATIC"
+            )
+            hrvDao.update(updated)
+            AppLog.d(tag, "Updated existing HRV sample within 60s in Room: $hrvMs ms (manual=$isManual)")
+        } else {
+            val entity = HrvEntity(
+                timestamp = timestamp,
+                hrvMs = hrvMs,
+                recordingMethod = if (isManual) "MANUAL" else "AUTOMATIC"
+            )
+            hrvDao.insert(entity)
+            AppLog.d(tag, "Saved HRV sample to Room: $hrvMs ms (manual=$isManual)")
+        }
+    }
+
+    /**
+     * Saves a single Stress score sample (0..100) to Room DB.
+     * Safety net: If a sample exists within +-60s, updates that row instead of inserting a duplicate.
+     */
+    suspend fun saveStress(stressScore: Int, timestamp: Long = System.currentTimeMillis(), isManual: Boolean = false) {
+        val existing = stressDao.findSampleBetween(timestamp - 60000L, timestamp + 60000L)
+        if (existing != null) {
+            val updated = existing.copy(
+                timestamp = timestamp,
+                stressScore = stressScore,
+                recordingMethod = if (isManual) "MANUAL" else "AUTOMATIC"
+            )
+            stressDao.update(updated)
+            AppLog.d(tag, "Updated existing Stress sample within 60s in Room: $stressScore (manual=$isManual)")
+        } else {
+            val entity = StressEntity(
+                timestamp = timestamp,
+                stressScore = stressScore,
+                recordingMethod = if (isManual) "MANUAL" else "AUTOMATIC"
+            )
+            stressDao.insert(entity)
+            AppLog.d(tag, "Saved Stress sample to Room: $stressScore (manual=$isManual)")
         }
     }
 
@@ -208,6 +303,38 @@ class RingHealthRepository(private val context: Context) {
 
     fun getSpo2Between(startTime: Long, endTime: Long): Flow<List<OxygenSaturationEntity>> =
         spo2Dao.getSamplesBetween(startTime, endTime)
+
+    fun getHrvForDay(date: Date): Flow<List<HrvEntity>> {
+        val cal = Calendar.getInstance().apply {
+            time = date
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val startOfDay = cal.timeInMillis
+        cal.add(Calendar.DAY_OF_YEAR, 1)
+        val endOfDay = cal.timeInMillis - 1
+        return hrvDao.getSamplesForDay(startOfDay, endOfDay)
+    }
+
+    fun getStressForDay(date: Date): Flow<List<StressEntity>> {
+        val cal = Calendar.getInstance().apply {
+            time = date
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val startOfDay = cal.timeInMillis
+        cal.add(Calendar.DAY_OF_YEAR, 1)
+        val endOfDay = cal.timeInMillis - 1
+        return stressDao.getSamplesForDay(startOfDay, endOfDay)
+    }
+
+    fun getRecentHrv(): Flow<List<HrvEntity>> = hrvDao.getRecentSamples()
+
+    fun getRecentStress(): Flow<List<StressEntity>> = stressDao.getRecentSamples()
 
     fun getSleepForDate(dateStr: String): Flow<SleepSessionEntity?> = sleepDao.getSleepForDate(dateStr)
 
@@ -301,6 +428,32 @@ class RingHealthRepository(private val context: Context) {
             }
         }
 
+        val allHrv = hrvDao.getAllSamplesAsc()
+        var lastHrv: HrvEntity? = null
+        for (record in allHrv) {
+            if (lastHrv != null && Math.abs(record.timestamp - lastHrv.timestamp) <= 60000L) {
+                if (record.hrvMs > 0) {
+                    hrvDao.deleteById(lastHrv.id)
+                    lastHrv = record
+                } else {
+                    hrvDao.deleteById(record.id)
+                }
+            } else {
+                lastHrv = record
+            }
+        }
+
+        val allStress = stressDao.getAllSamplesAsc()
+        var lastStress: StressEntity? = null
+        for (record in allStress) {
+            if (lastStress != null && Math.abs(record.timestamp - lastStress.timestamp) <= 60000L) {
+                stressDao.deleteById(lastStress.id)
+                lastStress = record
+            } else {
+                lastStress = record
+            }
+        }
+
         AppLog.i(tag, "History deduplication completed: removed $hrRemoved HR records and $spo2Removed SpO2 records")
         return Pair(hrRemoved, spo2Removed)
     }
@@ -311,6 +464,8 @@ class RingHealthRepository(private val context: Context) {
     suspend fun clearAllHistory() {
         hrDao.deleteAll()
         spo2Dao.deleteAll()
+        hrvDao.deleteAll()
+        stressDao.deleteAll()
         stepsDao.deleteAll()
         sleepDao.deleteAll()
         AppLog.i(tag, "Cleared all local biometric history from Room DB")

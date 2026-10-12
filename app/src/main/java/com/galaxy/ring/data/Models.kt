@@ -39,6 +39,28 @@ data class OxygenSaturationSample(
 )
 
 /**
+ * Heart Rate Variability (HRV in milliseconds, e.g. RMSSD).
+ */
+data class HrvSample(
+    val hrvMs: Int,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+/**
+ * Real-time Stress level measurement (0..100).
+ */
+data class StressSample(
+    val score: Int,
+    val label: String = when (score) {
+        in 0..25 -> "Low"
+        in 26..50 -> "Normal"
+        in 51..75 -> "Moderate"
+        else -> "High"
+    },
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+/**
  * Step count and activity metrics.
  */
 data class StepData(
@@ -125,6 +147,10 @@ data class RingHealthSnapshot(
     val heartRateHistory: List<HeartRateSample> = emptyList(),
     val latestOxygenSaturation: OxygenSaturationSample? = null,
     val oxygenSaturationHistory: List<OxygenSaturationSample> = emptyList(),
+    val latestHrv: HrvSample? = null,
+    val hrvHistory: List<HrvSample> = emptyList(),
+    val latestStress: StressSample? = null,
+    val stressHistory: List<StressSample> = emptyList(),
     val steps: StepData = StepData(totalSteps = 0L, caloriesKcal = 0, distanceMeters = 0.0, timestamp = 0L),
     val temperature: SkinTemperature = SkinTemperature(temperatureCelsius = 0f, baselineDelta = 0.0f, timestamp = 0L),
     val latestSleep: SleepSession? = null,

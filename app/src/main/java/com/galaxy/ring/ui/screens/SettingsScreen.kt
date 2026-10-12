@@ -74,6 +74,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import com.galaxy.ring.data.ConnectionState
+
 @Composable
 fun SettingsScreen(
     onOpenHealthRationale: () -> Unit,
@@ -84,11 +88,14 @@ fun SettingsScreen(
     val context = LocalContext.current
     val app = GalaxyRingApp.instance
     val repo = app.healthRepository
+    val scope = rememberCoroutineScope()
     var adminTapCount by remember { mutableIntStateOf(0) }
     var isAdminUnlocked by remember { mutableStateOf(true) }
 
     var isKeepConnected by remember { mutableStateOf(repo.isKeepConnected) }
     var isBondingEnabled by remember { mutableStateOf(repo.isBondingEnabled) }
+    var isRingDisplayEnabled by remember { mutableStateOf(repo.isRingDisplayEnabled) }
+    var displayStatusMessage by remember { mutableStateOf<String?>(null) }
     var showBatteryPromptDialog by remember { mutableStateOf(false) }
 
     var isScheduleEnabled by remember { mutableStateOf(repo.isScheduleEnabled) }
@@ -364,6 +371,84 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+        }
+
+        // 1b. Ring Display & Screen Wake Section
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(CyberCyan.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Security,
+                                    contentDescription = null,
+                                    tint = CyberCyan,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Ring display",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "When off, the ring screen stays dark and does not light up for gestures/metrics",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = isRingDisplayEnabled,
+                            onCheckedChange = { enabled ->
+                                isRingDisplayEnabled = enabled
+                                scope.launch {
+                                    val ok = app.bleRepository.setRingDisplay(enabled)
+                                    if (!ok && app.bleRepository.connectionState.value is ConnectionState.Ready) {
+                                        displayStatusMessage = "Display command not confirmed on this firmware — export Admin logs"
+                                    } else {
+                                        displayStatusMessage = null
+                                    }
+                                }
+                            },
+                            modifier = Modifier.testTag("ring_display_toggle"),
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF0F172A), checkedTrackColor = CyberCyan)
+                        )
+                    }
+
+                    if (displayStatusMessage != null) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = displayStatusMessage!!,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                            color = RosePulse
+                        )
+                    }
                 }
             }
         }
@@ -1010,7 +1095,7 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "Dedicated companion for Galaxy Ring & SR16 BLE peripherals",
+                        text = "Dedicated companion for Galaxy Ring BLE peripherals",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

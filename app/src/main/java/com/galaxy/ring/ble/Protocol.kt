@@ -303,6 +303,81 @@ object Protocol {
     fun buildSpO2StartCommand(): ByteArray = buildMeasurementCommand(MEASURE_TYPE_SPO2, true)
     fun buildSpO2StopCommand(): ByteArray = buildMeasurementCommand(MEASURE_TYPE_SPO2, false)
 
+    // Probe order for HRV (0x03=HR and 0x09=SpO2 are excluded)
+    val HRV_PROBE_TYPES: List<Byte> = listOf(
+        0x04.toByte(), 0x05.toByte(), 0x06.toByte(), 0x07.toByte(), 0x08.toByte(), 0x0A.toByte(), 0x0B.toByte()
+    )
+
+    // Probe order for Stress (0x03=HR, 0x09=SpO2, and HRV type excluded)
+    val STRESS_ALL_CANDIDATE_TYPES: List<Byte> = listOf(
+        0x04.toByte(), 0x05.toByte(), 0x06.toByte(), 0x07.toByte(), 0x08.toByte(), 0x0A.toByte(), 0x0B.toByte(),
+        0x0C.toByte(), 0x0D.toByte(), 0x0E.toByte()
+    )
+
+    fun getStressCandidateTypes(claimedHrvType: Byte?): List<Byte> {
+        return STRESS_ALL_CANDIDATE_TYPES.filter { it != claimedHrvType }
+    }
+
+    fun buildHrvStartCommand(type: Byte): ByteArray = buildMeasurementCommand(type, true)
+    fun buildHrvStopCommand(type: Byte): ByteArray = buildMeasurementCommand(type, false)
+
+    fun buildStressStartCommand(type: Byte): ByteArray = buildMeasurementCommand(type, true)
+    fun buildStressStopCommand(type: Byte): ByteArray = buildMeasurementCommand(type, false)
+
+    // Display ON / OFF probe candidate keys (A..E)
+    val DISPLAY_CANDIDATE_KEYS = listOf(0x0306, 0x0307, 0x0203, 0x0204, 0x0264)
+
+    fun buildDisplayCommand(key: Int, enabled: Boolean): ByteArray {
+        val data = byteArrayOf(if (enabled) 0x01.toByte() else 0x00.toByte())
+        return encodeFrame(
+            flag = FLAG_COMMAND,
+            key = key,
+            keyFlag = KEY_FLAG_WRITE,
+            data = data
+        )
+    }
+
+    data class GenericMetricParsed(
+        val key: Int,
+        val value: Int,
+        val timestamp: Long
+    )
+
+    /**
+     * Parses generic biometric value from an incoming frame with unknown push key:
+     * layout: key(2) + keyFlag(1) + data
+     * data: timestamp(4 BE) + value(1) + ...
+     * Accepts plausible value within [minVal..maxVal].
+     */
+    fun parseGenericMetricValue(frame: Frame, minVal: Int, maxVal: Int): GenericMetricParsed? {
+        val data = frame.data
+        val now = System.currentTimeMillis()
+        if (data.size >= 5) {
+            val recordCount = (data.size / 6).coerceAtLeast(1)
+            for (i in 0 until recordCount) {
+                val offset = i * 6
+                if (offset + 4 >= data.size) break
+                val v8 = data[offset + 4].toInt() and 0xFF
+                if (v8 in minVal..maxVal) {
+                    return GenericMetricParsed(frame.key, v8, now)
+                }
+                if (offset + 5 < data.size) {
+                    val v16 = ((v8 shl 8) or (data[offset + 5].toInt() and 0xFF))
+                    if (v16 in minVal..maxVal) {
+                        return GenericMetricParsed(frame.key, v16, now)
+                    }
+                }
+            }
+        }
+        for (b in data) {
+            val v = b.toInt() and 0xFF
+            if (v in minVal..maxVal && v != 0) {
+                return GenericMetricParsed(frame.key, v, now)
+            }
+        }
+        return null
+    }
+
     const val KEY_FIND_RING: Int = 0x0305
 
     fun buildFindRingCommand(): ByteArray {
@@ -711,11 +786,9 @@ object Protocol {
         if (frame.key != KEY_SLEEP_PUSH) return null
         val fullHex = frame.fullPayload.joinToString(" ") { "%02X".format(it) }
         val data = frame.data
-        Log.i(TAG, "parseSleepFrame: key=0x051B, flag=0x${"%02X".format(frame.flag)}, fullPayload hex: $fullHex (data bytes: ${data.size})")
         AppLog.i("Protocol", "parseSleepFrame: key=0x051B, flag=0x${"%02X".format(frame.flag)}, fullPayload hex: $fullHex (data bytes: ${data.size})")
 
         if (data.isEmpty() || data.all { it.toInt() == 0 }) {
-            Log.i(TAG, "parseSleepFrame: payload is empty or all zeroes; leaving sleep record empty")
             AppLog.i("Protocol", "parseSleepFrame: payload is empty or all zeroes; leaving sleep record empty")
             return null
         }
@@ -747,7 +820,7 @@ object Protocol {
                         parsedStartTime = t1BE * 1000L
                         parsedEndTime = t2BE * 1000L
                         parsedDurationMinutes = diffMin
-                        Log.i(TAG, "parseSleepFrame: Detected Unix BE timestamps: start=$parsedStartTime, end=$parsedEndTime, dur=${diffMin}m")
+                        AppLog.i("Protocol", "parseSleepFrame: Detected Unix BE timestamps: start=$parsedStartTime, end=$parsedEndTime, dur=${diffMin}m")
                         break
                     }
                 }
@@ -760,7 +833,7 @@ object Protocol {
                         parsedStartTime = t1LE * 1000L
                         parsedEndTime = t2LE * 1000L
                         parsedDurationMinutes = diffMin
-                        Log.i(TAG, "parseSleepFrame: Detected Unix LE timestamps: start=$parsedStartTime, end=$parsedEndTime, dur=${diffMin}m")
+                        AppLog.i("Protocol", "parseSleepFrame: Detected Unix LE timestamps: start=$parsedStartTime, end=$parsedEndTime, dur=${diffMin}m")
                         break
                     }
                 }
@@ -775,13 +848,13 @@ object Protocol {
                     val dBE = u16BE(off)
                     if (dBE in 15L..960L) {
                         parsedDurationMinutes = dBE
-                        Log.i(TAG, "parseSleepFrame: Detected BE duration at offset $off: ${dBE}m")
+                        AppLog.i("Protocol", "parseSleepFrame: Detected BE duration at offset $off: ${dBE}m")
                         break
                     }
                     val dLE = u16LE(off)
                     if (dLE in 15L..960L) {
                         parsedDurationMinutes = dLE
-                        Log.i(TAG, "parseSleepFrame: Detected LE duration at offset $off: ${dLE}m")
+                        AppLog.i("Protocol", "parseSleepFrame: Detected LE duration at offset $off: ${dLE}m")
                         break
                     }
                 }
@@ -790,7 +863,7 @@ object Protocol {
                     val sBE = u32BE(off)
                     if (sBE in 900L..57600L) {
                         parsedDurationMinutes = sBE / 60L
-                        Log.i(TAG, "parseSleepFrame: Detected 32-bit seconds duration at offset $off: ${sBE}s (${parsedDurationMinutes}m)")
+                        AppLog.i("Protocol", "parseSleepFrame: Detected 32-bit seconds duration at offset $off: ${sBE}s (${parsedDurationMinutes}m)")
                         break
                     }
                 }
@@ -805,7 +878,7 @@ object Protocol {
                     val totalM = bVal * 60 + u8(i + 1)
                     if (totalM in 15L..960L) {
                         parsedDurationMinutes = totalM
-                        Log.i(TAG, "parseSleepFrame: Detected hours:mins at offset $i: ${bVal}h ${u8(i + 1)}m = ${totalM}m")
+                        AppLog.i("Protocol", "parseSleepFrame: Detected hours:mins at offset $i: ${bVal}h ${u8(i + 1)}m = ${totalM}m")
                         break
                     }
                 }
@@ -813,7 +886,6 @@ object Protocol {
         }
 
         if (parsedDurationMinutes < 15L) {
-            Log.w(TAG, "parseSleepFrame: Duration ${parsedDurationMinutes}m is < 15m; invalid or zero sleep")
             AppLog.w("Protocol", "parseSleepFrame: Duration ${parsedDurationMinutes}m is < 15m; invalid or zero sleep")
             return null
         }
@@ -868,7 +940,6 @@ object Protocol {
 
         val quality = (80 + ((deepMins.toFloat() / parsedDurationMinutes) * 30)).roundToInt().coerceIn(40, 100)
 
-        Log.i(TAG, "parseSleepFrame: Successfully constructed SleepSession: start=$finalStartTime, end=$finalEndTime, dur=${parsedDurationMinutes}m, quality=$quality")
         AppLog.i("Protocol", "parseSleepFrame: Successfully constructed SleepSession: start=$finalStartTime, end=$finalEndTime, dur=${parsedDurationMinutes}m, quality=$quality")
         return SleepSession(
             startTime = finalStartTime,

@@ -116,3 +116,75 @@ interface SleepDao {
     @Query("DELETE FROM sleep_session_records")
     suspend fun deleteAll()
 }
+
+@Dao
+interface HrvDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(entity: HrvEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(entities: List<HrvEntity>)
+
+    @Query("SELECT * FROM hrv_records WHERE timestamp >= :startOfDay AND timestamp <= :endOfDay ORDER BY timestamp ASC")
+    fun getSamplesForDay(startOfDay: Long, endOfDay: Long): Flow<List<HrvEntity>>
+
+    @Query("SELECT * FROM hrv_records WHERE timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp ASC")
+    fun getSamplesBetween(startTime: Long, endTime: Long): Flow<List<HrvEntity>>
+
+    @Query("SELECT * FROM hrv_records ORDER BY timestamp DESC LIMIT 1")
+    fun getLatestSample(): Flow<HrvEntity?>
+
+    @Query("SELECT * FROM hrv_records ORDER BY timestamp DESC LIMIT 100")
+    fun getRecentSamples(): Flow<List<HrvEntity>>
+
+    @Query("SELECT * FROM hrv_records WHERE timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp DESC LIMIT 1")
+    suspend fun findSampleBetween(startTime: Long, endTime: Long): HrvEntity?
+
+    @androidx.room.Update
+    suspend fun update(entity: HrvEntity)
+
+    @Query("SELECT * FROM hrv_records ORDER BY timestamp ASC")
+    suspend fun getAllSamplesAsc(): List<HrvEntity>
+
+    @Query("DELETE FROM hrv_records WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM hrv_records")
+    suspend fun deleteAll()
+}
+
+@Dao
+interface StressDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(entity: StressEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(entities: List<StressEntity>)
+
+    @Query("SELECT * FROM stress_records WHERE timestamp >= :startOfDay AND timestamp <= :endOfDay ORDER BY timestamp ASC")
+    fun getSamplesForDay(startOfDay: Long, endOfDay: Long): Flow<List<StressEntity>>
+
+    @Query("SELECT * FROM stress_records WHERE timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp ASC")
+    fun getSamplesBetween(startTime: Long, endTime: Long): Flow<List<StressEntity>>
+
+    @Query("SELECT * FROM stress_records ORDER BY timestamp DESC LIMIT 1")
+    fun getLatestSample(): Flow<StressEntity?>
+
+    @Query("SELECT * FROM stress_records ORDER BY timestamp DESC LIMIT 100")
+    fun getRecentSamples(): Flow<List<StressEntity>>
+
+    @Query("SELECT * FROM stress_records WHERE timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp DESC LIMIT 1")
+    suspend fun findSampleBetween(startTime: Long, endTime: Long): StressEntity?
+
+    @androidx.room.Update
+    suspend fun update(entity: StressEntity)
+
+    @Query("SELECT * FROM stress_records ORDER BY timestamp ASC")
+    suspend fun getAllSamplesAsc(): List<StressEntity>
+
+    @Query("DELETE FROM stress_records WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM stress_records")
+    suspend fun deleteAll()
+}
