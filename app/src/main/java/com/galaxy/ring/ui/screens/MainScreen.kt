@@ -164,13 +164,15 @@ fun MainScreen(
             syncStatus = SyncStatus.Syncing
             val res = bleRepo.syncRingData(isAutomatic = false)
             if (res.success) {
-                val sleepStr = if (res.hasSleep) "yes (${res.sleepMinutes}m)" else "no"
-                val msg = "Synced: steps=${res.steps}, sleep=$sleepStr | HC: ${res.hcStatus}"
+                val sleepStr = if (res.hasSleep) "yes" else "no"
+                val msg = "Steps: ${res.steps}, Sleep: $sleepStr, HC: ${res.hcStatus}"
                 syncStatus = SyncStatus.Success(msg)
                 snackbarHostState.showSnackbar(msg)
             } else {
+                val sleepStr = if (res.hasSleep) "yes" else "no"
+                val msg = "Sync failed: ${res.message} (Steps: ${res.steps}, Sleep: $sleepStr, HC: ${res.hcStatus})"
                 syncStatus = SyncStatus.Error(res.message)
-                snackbarHostState.showSnackbar("Sync failed: ${res.message}")
+                snackbarHostState.showSnackbar(msg)
             }
         }
     }

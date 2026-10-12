@@ -328,5 +328,54 @@ class ProtocolTest {
         assertNotNull(sleep?.stages)
         assertTrue(sleep!!.stages.isNotEmpty())
     }
+
+    @Test
+    fun testSleepQueryCommands1Through4() {
+        // Query 1: 051B keyFlag 0x10, no data
+        val cmd1 = Protocol.buildSleepCommandA()
+        val f1 = Protocol.parseFramesFromStream(cmd1).first[0]
+        assertEquals(Protocol.KEY_SLEEP_PUSH, f1.key)
+        assertEquals(Protocol.KEY_FLAG_READ, f1.keyFlag)
+        assertEquals(0, f1.data.size)
+
+        // Query 2: 051B keyFlag 0x00, no data
+        val cmd2 = Protocol.buildSleepCommandB()
+        val f2 = Protocol.parseFramesFromStream(cmd2).first[0]
+        assertEquals(Protocol.KEY_SLEEP_PUSH, f2.key)
+        assertEquals(Protocol.KEY_FLAG_WRITE, f2.keyFlag)
+        assertEquals(0, f2.data.size)
+
+        // Query 3: 051B keyFlag 0x10, data [0x00]
+        val cmd3 = Protocol.buildSleepCommandC()
+        val f3 = Protocol.parseFramesFromStream(cmd3).first[0]
+        assertEquals(Protocol.KEY_SLEEP_PUSH, f3.key)
+        assertEquals(Protocol.KEY_FLAG_READ, f3.keyFlag)
+        assertArrayEquals(byteArrayOf(0x00), f3.data)
+
+        // Query 4: 051B keyFlag 0x10, data [0x01]
+        val cmd4 = Protocol.buildSleepCommandD()
+        val f4 = Protocol.parseFramesFromStream(cmd4).first[0]
+        assertEquals(Protocol.KEY_SLEEP_PUSH, f4.key)
+        assertEquals(Protocol.KEY_FLAG_READ, f4.keyFlag)
+        assertArrayEquals(byteArrayOf(0x01), f4.data)
+    }
+
+    @Test
+    fun testParseSleepFrameSecondsDuration() {
+        // 28800 seconds = 480 minutes (8 hours)
+        // 28800 = 0x00007080
+        val data = byteArrayOf(0x00, 0x00, 0x70, 0x80.toByte(), 0x00, 0x00)
+        val frame = Protocol.Frame(
+            flag = Protocol.FLAG_PUSH,
+            key = Protocol.KEY_SLEEP_PUSH,
+            keyFlag = 0x10,
+            data = data,
+            fullPayload = byteArrayOf(0x05, 0x1B, 0x10) + data,
+            crcOk = true
+        )
+        val sleep = Protocol.parseSleepFrame(frame)
+        assertNotNull(sleep)
+        assertEquals(480L, sleep?.durationMinutes)
+    }
 }
 

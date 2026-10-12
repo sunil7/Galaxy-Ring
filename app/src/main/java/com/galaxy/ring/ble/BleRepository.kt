@@ -923,18 +923,18 @@ class BleRepository(
             // D) Health Connect verification
             val hasHcPerms = healthWriter.hasAllPermissions()
             val hcStatus = if (!healthWriter.isHealthConnectAvailable()) {
-                "HC unavailable"
+                "unavailable"
             } else if (!hasHcPerms) {
-                "HC permission required"
-            } else if (hcSuccess) {
-                "HC OK"
+                "denied"
+            } else if (healthWriter.lastWriteError != null && !hcSuccess && (stepsCount > 0 || sleepSession != null)) {
+                "error: ${healthWriter.lastWriteError}"
             } else {
-                healthWriter.lastWriteStatus
+                "ok"
             }
 
-            val sleepStr = if (sleepSession != null) "yes (${sleepSession.durationMinutes}m)" else "no"
-            val resultSummary = "Synced: steps=$stepsCount, sleep=$sleepStr"
-            AppLog.i(tagSync, "=== Sequential Sync Finished: $resultSummary | HC: $hcStatus ===")
+            val sleepStr = if (sleepSession != null) "yes" else "no"
+            val resultSummary = "Steps: $stepsCount, Sleep: $sleepStr, HC: $hcStatus"
+            AppLog.i(tagSync, "=== Sequential Sync Finished: $resultSummary ===")
 
             return SyncResult(
                 success = true,

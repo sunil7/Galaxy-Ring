@@ -852,22 +852,23 @@ class GalaxyRingBLEManager(
 
     /**
      * Executes the robust 0x051B sleep query sequence:
-     * 1) key 0x051B, keyFlag 0x10, no data
-     * 2) key 0x051B, keyFlag 0x00, no data
-     * 3) key 0x051B, keyFlag 0x10, data [0x00] (last night / today)
-     * 4) key 0x051B, keyFlag 0x10, data [0x01] (yesterday)
-     * 5) key 0x051B, keyFlag 0x10, data [0x00, 0x01] (today + yesterday)
-     * Timeout 12s per attempt, 1 retry each. Stops at first valid RX.
+     * Try in order; stop at first valid RX; log each attempt:
+     *   1) key 0x051B, keyFlag 0x10, no data
+     *   2) key 0x051B, keyFlag 0x00, no data
+     *   3) key 0x051B, keyFlag 0x10, data [0x00]
+     *   4) key 0x051B, keyFlag 0x10, data [0x01]
+     * Timeout 12s, 1 retry each.
+     * Parse ANY RX with key 0x051B (any flag). Best-effort: start/end or duration + stages if present.
+     * Always logs full 051B payload hex when RX arrives.
      */
     suspend fun syncSleepSequence(gatt: BluetoothGatt): com.galaxy.ring.data.SleepSession? {
-        AppLog.i(tag, "Starting 051B Sleep Query Sequence (Variants 1..5, timeout 12s each, 1 retry)...")
+        AppLog.i(tag, "Starting 051B Sleep Query Sequence (Queries 1..4, timeout 12s each, 1 retry)...")
 
         val queries = listOf(
-            Triple("1 (051B keyFlag=0x10 empty)", Protocol.buildSleepCommandA(), "05 1B 10"),
-            Triple("2 (051B keyFlag=0x00 empty)", Protocol.buildSleepCommandB(), "05 1B 00"),
-            Triple("3 (051B keyFlag=0x10 data=0x00 last night)", Protocol.buildSleepCommandC(), "05 1B 10 00"),
-            Triple("4 (051B keyFlag=0x10 data=0x01 yesterday)", Protocol.buildSleepCommandD(), "05 1B 10 01"),
-            Triple("5 (051B keyFlag=0x10 data=0x00 0x01)", Protocol.buildSleepCommandE(), "05 1B 10 00 01")
+            Triple("1 (key 0x051B, keyFlag 0x10, no data)", Protocol.buildSleepCommandA(), "05 1B 10"),
+            Triple("2 (key 0x051B, keyFlag 0x00, no data)", Protocol.buildSleepCommandB(), "05 1B 00"),
+            Triple("3 (key 0x051B, keyFlag 0x10, data [0x00])", Protocol.buildSleepCommandC(), "05 1B 10 00"),
+            Triple("4 (key 0x051B, keyFlag 0x10, data [0x01])", Protocol.buildSleepCommandD(), "05 1B 10 01")
         )
 
         for ((name, frame, spec) in queries) {
@@ -876,21 +877,22 @@ class GalaxyRingBLEManager(
             val reply = executeCommand(gatt, frame, Protocol.KEY_SLEEP_PUSH, timeoutMs = 12000L, maxRetries = 1)
             if (reply != null) {
                 val rxHex = reply.fullPayload.joinToString(" ") { "%02X".format(it) }
-                AppLog.i(tag, "Sleep Query $name SUCCEEDED! RX received from ring: $rxHex (flag=0x${"%02X".format(reply.flag)})")
+                AppLog.i(tag, "0x051B Sleep RX arrived on $name: $rxHex (flag=0x${"%02X".format(reply.flag)})")
+                // Stop at first valid RX: parse ANY RX with key 0x051B (any flag)
                 val sleep = Protocol.parseSleepFrame(reply)
                 if (sleep != null) {
                     AppLog.i(tag, "Sleep session successfully parsed from $name: ${sleep.durationMinutes} mins")
-                    _sleepFlow.emit(sleep)
                     return sleep
                 } else {
-                    AppLog.i(tag, "Sleep Query $name returned payload ($rxHex) but 0 or invalid sleep duration; trying next variant...")
+                    AppLog.i(tag, "0x051B valid RX received on $name ($rxHex), but payload contains 0 sleep duration. Stopping at first valid RX.")
+                    return null
                 }
             } else {
-                AppLog.w(tag, "Sleep Query $name timed out after 12s (0 RX).")
+                AppLog.w(tag, "Sleep Query $name timed out after 12s (1 retry, 0 matching RX).")
             }
         }
 
-        AppLog.e(tag, "Sleep Query 1-5 complete: 0 valid sleep RX received for 051B. Last TX: $lastTxHex. Sleep left empty without dummy data.")
+        AppLog.e(tag, "All 4 Sleep Queries (0x051B) failed: 0 RX received from ring. Last TX: $lastTxHex. Sleep tab: No sleep data from ring. Wear overnight, then tap Sync from ring.")
         return null
     }
 }

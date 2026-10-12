@@ -79,6 +79,13 @@ class HealthConnectWriter(private val context: Context) {
         HealthPermission.getReadPermission(OxygenSaturationRecord::class)
     )
 
+    val corePermissions: Set<String> = setOf(
+        HealthPermission.getWritePermission(HeartRateRecord::class),
+        HealthPermission.getWritePermission(StepsRecord::class),
+        HealthPermission.getWritePermission(SleepSessionRecord::class),
+        HealthPermission.getWritePermission(OxygenSaturationRecord::class)
+    )
+
     fun isHealthConnectAvailable(): Boolean {
         val status = HealthConnectClient.getSdkStatus(context)
         return status == HealthConnectClient.SDK_AVAILABLE
@@ -88,8 +95,8 @@ class HealthConnectWriter(private val context: Context) {
         val client = healthConnectClient ?: return false
         return try {
             val granted = client.permissionController.getGrantedPermissions()
-            val allOk = granted.containsAll(requiredPermissions)
-            AppLog.i(tag, "Health Connect permissions check: allGranted=$allOk (granted count: ${granted.size}/${requiredPermissions.size})")
+            val allOk = granted.containsAll(corePermissions)
+            AppLog.i(tag, "Health Connect permissions check: coreGranted=$allOk (granted count: ${granted.size}/${requiredPermissions.size})")
             allOk
         } catch (e: Exception) {
             AppLog.e(tag, "Error checking Health Connect permissions: ${e.message}", e)
@@ -235,6 +242,13 @@ class HealthConnectWriter(private val context: Context) {
                     clientRecordId = "steps_$dateStr"
                 )
             )
+            try {
+                client.deleteRecords(
+                    recordType = StepsRecord::class,
+                    recordIdsList = emptyList(),
+                    clientRecordIdsList = listOf("steps_$dateStr")
+                )
+            } catch (_: Exception) {}
             client.insertRecords(listOf(record))
             val now = System.currentTimeMillis()
             lastWriteTime = now
@@ -296,6 +310,13 @@ class HealthConnectWriter(private val context: Context) {
                     clientRecordId = "sleep_$dateStr"
                 )
             )
+            try {
+                client.deleteRecords(
+                    recordType = SleepSessionRecord::class,
+                    recordIdsList = emptyList(),
+                    clientRecordIdsList = listOf("sleep_$dateStr")
+                )
+            } catch (_: Exception) {}
             client.insertRecords(listOf(record))
             val now = System.currentTimeMillis()
             lastWriteTime = now

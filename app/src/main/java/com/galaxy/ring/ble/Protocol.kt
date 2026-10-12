@@ -769,19 +769,28 @@ object Protocol {
 
         // If no explicit epoch timestamps, check for duration fields
         if (parsedDurationMinutes == 0L) {
-            val candidateOffsets = listOf(0, 2, 4, 6, 8)
+            val candidateOffsets = listOf(0, 1, 2, 3, 4, 5, 6, 7, 8)
             for (off in candidateOffsets) {
                 if (off + 1 < data.size) {
                     val dBE = u16BE(off)
-                    if (dBE in 30L..960L) {
+                    if (dBE in 15L..960L) {
                         parsedDurationMinutes = dBE
                         Log.i(TAG, "parseSleepFrame: Detected BE duration at offset $off: ${dBE}m")
                         break
                     }
                     val dLE = u16LE(off)
-                    if (dLE in 30L..960L) {
+                    if (dLE in 15L..960L) {
                         parsedDurationMinutes = dLE
                         Log.i(TAG, "parseSleepFrame: Detected LE duration at offset $off: ${dLE}m")
+                        break
+                    }
+                }
+                // Check 4-byte duration in seconds (e.g. 1800..57600 seconds)
+                if (off + 3 < data.size) {
+                    val sBE = u32BE(off)
+                    if (sBE in 900L..57600L) {
+                        parsedDurationMinutes = sBE / 60L
+                        Log.i(TAG, "parseSleepFrame: Detected 32-bit seconds duration at offset $off: ${sBE}s (${parsedDurationMinutes}m)")
                         break
                     }
                 }
@@ -794,7 +803,7 @@ object Protocol {
                 val bVal = u8(i)
                 if (bVal in 1L..16L && i + 1 < data.size && u8(i + 1) in 0L..59L) {
                     val totalM = bVal * 60 + u8(i + 1)
-                    if (totalM in 60L..960L) {
+                    if (totalM in 15L..960L) {
                         parsedDurationMinutes = totalM
                         Log.i(TAG, "parseSleepFrame: Detected hours:mins at offset $i: ${bVal}h ${u8(i + 1)}m = ${totalM}m")
                         break
