@@ -1,14 +1,24 @@
 package com.galaxy.ring.ble
 
+import com.galaxy.ring.data.SleepPageStore
+import com.galaxy.ring.data.SleepStage
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
+import java.util.Calendar
+import java.util.TimeZone
 
 class ProtocolTest {
+
+    @Before
+    fun clearSleepPages() {
+        SleepPageStore.clear()
+    }
 
     private fun bytesFromHex(hex: String): ByteArray {
         val clean = hex.replace(" ", "").trim()
@@ -23,6 +33,30 @@ class ProtocolTest {
     private fun hexFromBytes(bytes: ByteArray): String {
         return bytes.joinToString(" ") { "%02X".format(it) }
     }
+
+    /** Seconds since 2000-01-01 for a device wall-clock time. */
+    private fun deviceSeconds(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long {
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+            clear()
+            set(year, month - 1, day, hour, minute, 0)
+        }
+        return cal.timeInMillis / 1000L - 946_684_800L
+    }
+
+    /** One 0x0505 record: 4-byte BE timestamp, stage code, 00 00. */
+    private fun sleepRecord(sec: Long, code: Int): ByteArray = byteArrayOf(
+        (sec shr 24).toByte(), (sec shr 16).toByte(), (sec shr 8).toByte(), sec.toByte(),
+        code.toByte(), 0x00, 0x00
+    )
+
+    private fun sleepFrame(data: ByteArray) = Protocol.Frame(
+        flag = Protocol.FLAG_PUSH,
+        key = Protocol.KEY_SLEEP,
+        keyFlag = 0x10,
+        data = data,
+        fullPayload = byteArrayOf(0x05, 0x05, 0x10) + data,
+        crcOk = true
+    )
 
     @Test
     fun testCrc16ArcVector() {
@@ -326,41 +360,56 @@ class ProtocolTest {
     }
 
     @Test
-    fun testParseSleepFrameValidDuration() {
-        // Construct 0505 frame with 450 minutes duration (0x01C2 = 450)
-        val data = byteArrayOf(0x01, 0xC2.toByte(), 0x00, 0x5A, 0x00, 0x64, 0x00, 0x50)
-        val frame = Protocol.Frame(
-            flag = Protocol.FLAG_PUSH,
-            key = Protocol.KEY_SLEEP,
-            keyFlag = 0x10,
-            data = data,
-            fullPayload = byteArrayOf(0x05, 0x05, 0x10) + data,
-            crcOk = true
-        )
-        val sleep = Protocol.parseSleepFrame(frame)
+    fun testParseSleepFrameOvernightRecords() {
+        // 23:35 -> 05:33 overnight (5h58m), anchored to the ring timestamps, never to "now"
+        val data = sleepRecord(deviceSeconds(2026, 10, 7, 23, 35), 0x01) +
+            sleepRecord(deviceSeconds(2026, 10, 7, 23, 48), 0x02) +
+            sleepRecord(deviceSeconds(2026, 10, 8, 0, 5), 0x01) +
+            sleepRecord(deviceSeconds(2026, 10, 8, 1, 0), 0x04) +
+            sleepRecord(deviceSeconds(2026, 10, 8, 5, 33), 0x00)
+
+        val sleep = Protocol.parseSleepFrame(sleepFrame(data))
         assertNotNull(sleep)
-        assertEquals(450L, sleep?.durationMinutes)
-        assertTrue((sleep?.qualityScore ?: 0) >= 40)
-        assertNotNull(sleep?.stages)
-        assertTrue(sleep!!.stages.isNotEmpty())
+        assertEquals(358L, sleep!!.durationMinutes)
+
+        val start = Calendar.getInstance().apply { timeInMillis = sleep.startTime }
+        assertEquals(23, start.get(Calendar.HOUR_OF_DAY))
+        assertEquals(35, start.get(Calendar.MINUTE))
+        val end = Calendar.getInstance().apply { timeInMillis = sleep.endTime }
+        assertEquals(5, end.get(Calendar.HOUR_OF_DAY))
+        assertEquals(33, end.get(Calendar.MINUTE))
+
+        assertEquals(4, sleep.stages.size)
+        assertEquals(SleepStage.LIGHT, sleep.stages[0].stage)
+        assertEquals(SleepStage.DEEP, sleep.stages[1].stage)
+        assertEquals(SleepStage.REM, sleep.stages[3].stage)
+        assertTrue(sleep.qualityScore in 0..100)
     }
 
     @Test
-    fun testParseSleepFrameSecondsDuration() {
-        // 28800 seconds = 480 minutes (8 hours)
-        // 28800 = 0x00007080
-        val data = byteArrayOf(0x00, 0x00, 0x70, 0x80.toByte(), 0x00, 0x00)
-        val frame = Protocol.Frame(
-            flag = Protocol.FLAG_PUSH,
-            key = Protocol.KEY_SLEEP,
-            keyFlag = 0x10,
-            data = data,
-            fullPayload = byteArrayOf(0x05, 0x05, 0x10) + data,
-            crcOk = true
-        )
-        val sleep = Protocol.parseSleepFrame(frame)
-        assertNotNull(sleep)
-        assertEquals(480L, sleep?.durationMinutes)
+    fun testParseSleepFrameMergesPages() {
+        val page1 = sleepRecord(deviceSeconds(2026, 10, 7, 23, 35), 0x01) +
+            sleepRecord(deviceSeconds(2026, 10, 7, 23, 48), 0x02)
+        val page2 = sleepRecord(deviceSeconds(2026, 10, 8, 0, 5), 0x01) +
+            sleepRecord(deviceSeconds(2026, 10, 8, 5, 33), 0x00)
+
+        val first = Protocol.parseSleepFrame(sleepFrame(page1))
+        assertNotNull(first)
+        assertEquals(13L, first!!.durationMinutes)
+
+        // The second page completes the same night: one merged session, 23:35 -> 05:33
+        val merged = Protocol.parseSleepFrame(sleepFrame(page2))
+        assertNotNull(merged)
+        assertEquals(358L, merged!!.durationMinutes)
+        assertEquals(first.startTime, merged.startTime)
+        assertEquals(3, merged.stages.size)
+    }
+
+    @Test
+    fun testParseSleepFrameWithoutTimestampsReturnsNull() {
+        // Bytes that are not valid 7-byte records must never become a made-up session
+        val data = byteArrayOf(0x01, 0xC2.toByte(), 0x00, 0x5A, 0x00, 0x64, 0x00)
+        assertNull(Protocol.parseSleepFrame(sleepFrame(data)))
     }
 
     @Test
@@ -446,4 +495,3 @@ class ProtocolTest {
         assertFalse(stressCandidates.contains(0x09.toByte()))
     }
 }
-
