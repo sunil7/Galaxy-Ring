@@ -6,10 +6,15 @@ import com.galaxy.ring.data.OxygenSaturationSample
 import com.galaxy.ring.data.RingBattery
 import com.galaxy.ring.data.RingHealthSnapshot
 import com.galaxy.ring.data.SkinTemperature
+import com.galaxy.ring.data.SleepAnalyzer
+import com.galaxy.ring.data.SleepPageStore
+import com.galaxy.ring.data.SleepRecordParser
+import com.galaxy.ring.data.SleepSegment
 import com.galaxy.ring.data.SleepSession
 import com.galaxy.ring.data.SleepStage
 import com.galaxy.ring.data.SleepStageRecord
 import com.galaxy.ring.data.StepData
+import com.galaxy.ring.data.isCompleted
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Calendar
@@ -765,9 +770,38 @@ object Protocol {
         return null
     }
 
+    /** Segments already written to AppLog (so merged pages do not log the same segment twice). */
+    private val loggedSleepSegments = HashSet<String>()
+
+    private fun logNewSleepSegments(segments: List<SleepSegment>) {
+        for (seg in segments) {
+            val key = "${seg.start}-${seg.end}-${seg.rawCode}"
+            val isNew = synchronized(loggedSleepSegments) { loggedSleepSegments.add(key) }
+            if (isNew) {
+                AppLog.i(
+                    "SleepSeg",
+                    "SleepSeg stage=${SleepRecordParser.stageLogName(seg.stage)} " +
+                        "start=${SleepRecordParser.formatClock(seg.start)} " +
+                        "end=${SleepRecordParser.formatClock(seg.end)} " +
+                        "dur=${seg.durationMin}m raw=0x${"%02X".format(seg.rawCode)}"
+                )
+            }
+        }
+    }
+
     /**
-     * Parses real sleep session payload from key 0x0505 (BLE_KEY_SLEEP).
-     * Always logs full payload hex. Returns null if empty, all zeroes, or invalid duration (< 15 min; no dummy sleep).
+     * Parses a real 0x0505 sleep history page (BLE_KEY_SLEEP).
+     *
+     * Payload after key + keyFlag = repeated 7-byte records:
+     *   [0..3] big-endian seconds since 2000-01-01 (device local wall clock)
+     *   [4]    stage code (0x01 Light, 0x02 Deep, 0x04 REM, 0x00/0x11/0x22 Awake)
+     *   [5..6] usually 00 00
+     *
+     * Records from every page are merged (SleepPageStore) and sorted, then split into nights.
+     * Returns the night that contains this page's newest record, so the last page of a sync
+     * returns the full merged night. sessionStart = first timestamp, sessionEnd = last timestamp;
+     * nothing is ever anchored to "now" and no stages are invented.
+     * Returns null if the payload is empty, all zeroes, or holds no valid records.
      */
     fun parseSleepFrame(frame: Frame): SleepSession? {
         if (frame.key != KEY_SLEEP && frame.key != KEY_SLEEP_PUSH) return null
@@ -780,196 +814,55 @@ object Protocol {
             return null
         }
 
-        val now = System.currentTimeMillis()
+        val trailing = data.size % SleepRecordParser.RECORD_SIZE
+        if (trailing != 0) {
+            AppLog.w("Protocol", "parseSleepFrame: payload length ${data.size} is not a multiple of ${SleepRecordParser.RECORD_SIZE}; ignoring $trailing trailing byte(s)")
+        }
 
-        fun u8(idx: Int): Long = (data[idx].toLong() and 0xFF)
-        fun u16BE(idx: Int): Long = if (idx + 1 < data.size) (u8(idx) shl 8) or u8(idx + 1) else 0L
-        fun u16LE(idx: Int): Long = if (idx + 1 < data.size) u8(idx) or (u8(idx + 1) shl 8) else 0L
-        fun u32BE(idx: Int): Long = if (idx + 3 < data.size) (u8(idx) shl 24) or (u8(idx + 1) shl 16) or (u8(idx + 2) shl 8) or u8(idx + 3) else 0L
-        fun u32LE(idx: Int): Long = if (idx + 3 < data.size) u8(idx) or (u8(idx + 1) shl 8) or (u8(idx + 2) shl 16) or (u8(idx + 3) shl 24) else 0L
-
-        var parsedStartTime: Long? = null
-        var parsedEndTime: Long? = null
-        var parsedDurationMinutes: Long = 0L
-
-        // Check for 4-byte Unix timestamps (in seconds)
-        // Accept timestamps within the last 7 days and not in future
-        val minEpochSec = (now - 7 * 86400000L) / 1000L
-        val maxEpochSec = (now + 86400000L) / 1000L
-
-        for (offset in listOf(0, 3, 4)) {
-            if (offset + 7 < data.size) {
-                val t1BE = u32BE(offset)
-                val t2BE = u32BE(offset + 4)
-                if (t1BE in minEpochSec..maxEpochSec && t2BE in minEpochSec..maxEpochSec && t1BE < t2BE) {
-                    val diffMin = (t2BE - t1BE) / 60
-                    if (diffMin in 15L..960L) {
-                        parsedStartTime = t1BE * 1000L
-                        parsedEndTime = t2BE * 1000L
-                        parsedDurationMinutes = diffMin
-                        AppLog.i("Protocol", "parseSleepFrame: Detected Unix BE timestamps: start=$parsedStartTime, end=$parsedEndTime, dur=${diffMin}m")
-                        break
-                    }
-                }
-
-                val t1LE = u32LE(offset)
-                val t2LE = u32LE(offset + 4)
-                if (t1LE in minEpochSec..maxEpochSec && t2LE in minEpochSec..maxEpochSec && t1LE < t2LE) {
-                    val diffMin = (t2LE - t1LE) / 60
-                    if (diffMin in 15L..960L) {
-                        parsedStartTime = t1LE * 1000L
-                        parsedEndTime = t2LE * 1000L
-                        parsedDurationMinutes = diffMin
-                        AppLog.i("Protocol", "parseSleepFrame: Detected Unix LE timestamps: start=$parsedStartTime, end=$parsedEndTime, dur=${diffMin}m")
-                        break
-                    }
-                }
+        val page = SleepRecordParser.parseRecords(data)
+        if (page.isEmpty()) {
+            AppLog.w("Protocol", "parseSleepFrame: no valid 7-byte records in payload")
+            return null
+        }
+        for (r in page) {
+            if (!SleepRecordParser.isKnownCode(r.code)) {
+                AppLog.w("Protocol", "parseSleepFrame: unknown stage code raw=0x${"%02X".format(r.code)} at ${SleepRecordParser.formatClock(r.tsMillis)}; treated as Awake")
             }
         }
 
-        // Check for RWFit Date header: [year-2000 (e.g. 20..35), month (1..12), day (1..31)...]
-        // or [year_hi, year_lo (2020..2035), month, day...]
-        var dateHeaderCal: Calendar? = null
-        if (data.size >= 5) {
-            val y1 = data[0].toInt() and 0xFF
-            val m1 = data[1].toInt() and 0xFF
-            val d1 = data[2].toInt() and 0xFF
-            if (y1 in 20..35 && m1 in 1..12 && d1 in 1..31) {
-                dateHeaderCal = Calendar.getInstance().apply {
-                    set(Calendar.YEAR, 2000 + y1)
-                    set(Calendar.MONTH, m1 - 1)
-                    set(Calendar.DAY_OF_MONTH, d1)
-                    set(Calendar.HOUR_OF_DAY, 8)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }
-                AppLog.i("Protocol", "parseSleepFrame: Detected RWFit date header: 20$y1-$m1-$d1")
-            } else if (data.size >= 6) {
-                val y2 = u16BE(0).toInt()
-                val m2 = data[2].toInt() and 0xFF
-                val d2 = data[3].toInt() and 0xFF
-                if (y2 in 2020..2035 && m2 in 1..12 && d2 in 1..31) {
-                    dateHeaderCal = Calendar.getInstance().apply {
-                        set(Calendar.YEAR, y2)
-                        set(Calendar.MONTH, m2 - 1)
-                        set(Calendar.DAY_OF_MONTH, d2)
-                        set(Calendar.HOUR_OF_DAY, 8)
-                        set(Calendar.MINUTE, 0)
-                        set(Calendar.SECOND, 0)
-                        set(Calendar.MILLISECOND, 0)
-                    }
-                    AppLog.i("Protocol", "parseSleepFrame: Detected RWFit 16-bit date header: $y2-$m2-$d2")
-                }
-            }
+        SleepPageStore.addPage(page)
+        val groups = SleepRecordParser.groupRecords(SleepPageStore.snapshot())
+        val pageTimestamps = page.map { it.tsMillis }.toSet()
+        val touched = groups.count { g -> g.any { it.tsMillis in pageTimestamps } }
+        if (touched > 1) {
+            AppLog.w("Protocol", "parseSleepFrame: page spans $touched separate nights; returning the latest one")
         }
 
-        // If no explicit epoch timestamps, check for duration fields
-        if (parsedDurationMinutes == 0L) {
-            val candidateOffsets = listOf(0, 1, 2, 3, 4, 5, 6, 7, 8)
-            for (off in candidateOffsets) {
-                if (off + 1 < data.size) {
-                    val dBE = u16BE(off)
-                    if (dBE in 15L..960L) {
-                        parsedDurationMinutes = dBE
-                        AppLog.i("Protocol", "parseSleepFrame: Detected BE duration at offset $off: ${dBE}m")
-                        break
-                    }
-                    val dLE = u16LE(off)
-                    if (dLE in 15L..960L) {
-                        parsedDurationMinutes = dLE
-                        AppLog.i("Protocol", "parseSleepFrame: Detected LE duration at offset $off: ${dLE}m")
-                        break
-                    }
-                }
-                // Check 4-byte duration in seconds (e.g. 1800..57600 seconds)
-                if (off + 3 < data.size) {
-                    val sBE = u32BE(off)
-                    if (sBE in 900L..57600L) {
-                        parsedDurationMinutes = sBE / 60L
-                        AppLog.i("Protocol", "parseSleepFrame: Detected 32-bit seconds duration at offset $off: ${sBE}s (${parsedDurationMinutes}m)")
-                        break
-                    }
-                }
-            }
-        }
-
-        // Single byte total hours/minutes fallback if small frame
-        if (parsedDurationMinutes == 0L && data.size >= 2) {
-            for (i in 0 until data.size) {
-                val bVal = u8(i)
-                if (bVal in 1L..16L && i + 1 < data.size && u8(i + 1) in 0L..59L) {
-                    val totalM = bVal * 60 + u8(i + 1)
-                    if (totalM in 15L..960L) {
-                        parsedDurationMinutes = totalM
-                        AppLog.i("Protocol", "parseSleepFrame: Detected hours:mins at offset $i: ${bVal}h ${u8(i + 1)}m = ${totalM}m")
-                        break
-                    }
-                }
-            }
-        }
-
-        if (parsedDurationMinutes < 15L) {
-            AppLog.w("Protocol", "parseSleepFrame: Duration ${parsedDurationMinutes}m is < 15m; invalid or zero sleep")
+        val pageNewest = page.maxOf { it.tsMillis }
+        val group = groups.firstOrNull { g -> pageNewest >= g.first().tsMillis && pageNewest <= g.last().tsMillis }
+        if (group == null) {
+            AppLog.w("Protocol", "parseSleepFrame: could not place page records into a night")
             return null
         }
 
-        val finalEndTime = parsedEndTime ?: dateHeaderCal?.timeInMillis ?: now
-        val finalStartTime = parsedStartTime ?: (finalEndTime - (parsedDurationMinutes * 60000L))
-
-        // Check if stages are available in remaining bytes
-        var deepMins = (parsedDurationMinutes * 0.22).toLong()
-        var remMins = (parsedDurationMinutes * 0.24).toLong()
-        var awakeMins = (parsedDurationMinutes * 0.06).toLong()
-
-        // If 8+ bytes, check if deep/light/rem/awake durations are present
-        if (data.size >= 10) {
-            val possibleDeep = u16BE(4)
-            val possibleLight = u16BE(6)
-            val possibleRem = u16BE(8)
-            if (possibleDeep + possibleLight + possibleRem in (parsedDurationMinutes - 60)..(parsedDurationMinutes + 60)) {
-                deepMins = possibleDeep
-                remMins = possibleRem
-            }
+        val segments = SleepRecordParser.segmentsFromRecords(group)
+        if (segments.isEmpty()) {
+            AppLog.i("Protocol", "parseSleepFrame: night has fewer than 2 distinct records; no stage segments yet")
+            return null
         }
+        logNewSleepSegments(segments)
 
-        val lightMins = (parsedDurationMinutes - deepMins - remMins - awakeMins).coerceAtLeast(0L)
+        val base = SleepRecordParser.sessionFromSegments(segments)
+        val score = runCatching { SleepAnalyzer.analyze(base).sleepScore }.getOrDefault(base.qualityScore)
+        val session = base.copy(qualityScore = score)
+        val status = if (session.isCompleted()) "COMPLETED" else "IN_PROGRESS"
 
-        val stages = mutableListOf<SleepStageRecord>()
-        var curTime = finalStartTime
-
-        if (lightMins > 0) {
-            val halfLight = (lightMins / 2) * 60000L
-            stages.add(SleepStageRecord(SleepStage.LIGHT, curTime, curTime + halfLight))
-            curTime += halfLight
-        }
-        if (deepMins > 0) {
-            val deepDur = deepMins * 60000L
-            stages.add(SleepStageRecord(SleepStage.DEEP, curTime, curTime + deepDur))
-            curTime += deepDur
-        }
-        if (remMins > 0) {
-            val remDur = remMins * 60000L
-            stages.add(SleepStageRecord(SleepStage.REM, curTime, curTime + remDur))
-            curTime += remDur
-        }
-        if (lightMins > 0) {
-            val remLight = (lightMins - (lightMins / 2)) * 60000L
-            stages.add(SleepStageRecord(SleepStage.LIGHT, curTime, curTime + remLight))
-            curTime += remLight
-        }
-        if (awakeMins > 0) {
-            stages.add(SleepStageRecord(SleepStage.AWAKE, curTime, finalEndTime))
-        }
-
-        val quality = (80 + ((deepMins.toFloat() / parsedDurationMinutes) * 30)).roundToInt().coerceIn(40, 100)
-
-        AppLog.i("Protocol", "parseSleepFrame: Successfully constructed SleepSession: start=$finalStartTime, end=$finalEndTime, dur=${parsedDurationMinutes}m, quality=$quality")
-        return SleepSession(
-            startTime = finalStartTime,
-            endTime = finalEndTime,
-            qualityScore = quality,
-            stages = stages
+        AppLog.i(
+            "Protocol",
+            "parseSleepFrame: session start=${SleepRecordParser.formatClock(session.startTime)} " +
+                "end=${SleepRecordParser.formatClock(session.endTime)} " +
+                "dur=${session.durationMinutes}m segments=${segments.size} status=$status"
         )
+        return session
     }
 }
