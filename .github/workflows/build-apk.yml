@@ -21,8 +21,11 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      # ubuntu-latest already ships the Android SDK (ANDROID_HOME).
+      # android-actions/setup-android@v3 was failing here ("Failed to find package 'tools'"),
+      # so it is replaced by a plain license acceptance so Gradle can fetch any missing packages.
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses > /dev/null || true
 
       - name: Prepare Secrets file
         run: |
