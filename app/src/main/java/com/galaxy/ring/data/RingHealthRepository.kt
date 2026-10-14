@@ -266,12 +266,13 @@ class RingHealthRepository(private val context: Context) {
             awakeMinutes = analysis.awakeMinutes,
             sleepScore = analysis.sleepScore,
             sleepEfficiency = analysis.sleepEfficiency,
-            stagesJson = "" // serialized if needed
+            // Real minute-level segments ("start,end,STAGE;..."), read back with SleepSessionEntity.toSegments()
+            stagesJson = SleepRecordParser.encodeStages(session.stages)
         )
         // Ensure single row per night by clearing old entry for date
         sleepDao.deleteForDate(dateStr)
         val id = sleepDao.insert(entity)
-        AppLog.d(tag, "Saved Sleep Session to Room: $dateStr (single row deduplicated), score=${analysis.sleepScore}")
+        AppLog.d(tag, "Saved Sleep Session to Room: $dateStr (single row deduplicated), score=${analysis.sleepScore}, segments=${session.stages.size}")
         return id
     }
 
