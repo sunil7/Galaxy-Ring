@@ -90,6 +90,7 @@ import com.galaxy.ring.data.SleepSession
 import com.galaxy.ring.data.SleepSessionEntity
 import com.galaxy.ring.data.SleepStage
 import com.galaxy.ring.data.SleepStageRecord
+import com.galaxy.ring.data.toSegments
 import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
 import com.galaxy.ring.ui.theme.NeonEmerald
