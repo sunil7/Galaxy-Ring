@@ -43,59 +43,74 @@ object SleepAnalyzer {
             }
         }
 
-        // If stages were not recorded or empty, derive standard distribution from duration
+        val timeAsleepMinutes: Long
+        val deepPercent: Float
+        val remPercent: Float
+        val lightPercent: Float
+        val awakePercent: Float
+        val sleepEfficiency: Float
+        val totalScore: Int
+
+        // If stages were not recorded or empty, do not synthesize stages (stages empty -> zeros, not invented values)
         if (session.stages.isEmpty()) {
-            deepMins = (totalBedTimeMinutes * 0.22).toLong()
-            remMins = (totalBedTimeMinutes * 0.25).toLong()
-            awakeMins = (totalBedTimeMinutes * 0.07).toLong()
-            lightMins = totalBedTimeMinutes - deepMins - remMins - awakeMins
-            awakeningsCount = 1
+            deepMins = 0L
+            remMins = 0L
+            awakeMins = 0L
+            lightMins = 0L
+            awakeningsCount = 0
+            timeAsleepMinutes = 0L
+            deepPercent = 0f
+            remPercent = 0f
+            lightPercent = 0f
+            awakePercent = 0f
+            sleepEfficiency = 0f
+            totalScore = 0
+        } else {
+            timeAsleepMinutes = (deepMins + lightMins + remMins).coerceAtLeast(1L)
+            deepPercent = deepMins.toFloat() / timeAsleepMinutes.toFloat()
+            remPercent = remMins.toFloat() / timeAsleepMinutes.toFloat()
+            lightPercent = lightMins.toFloat() / timeAsleepMinutes.toFloat()
+            awakePercent = awakeMins.toFloat() / totalBedTimeMinutes.toFloat()
+
+            sleepEfficiency = (timeAsleepMinutes.toFloat() / totalBedTimeMinutes.toFloat()).coerceIn(0f, 1f)
+
+            // Sleep Score (0..100) Heuristic
+            // 1. Duration vs target (up to 45 pts)
+            val durationRatio = timeAsleepMinutes.toFloat() / targetDurationMinutes.toFloat()
+            val durationScore = when {
+                durationRatio in 0.95f..1.10f -> 45f
+                durationRatio < 0.95f -> (durationRatio / 0.95f) * 45f
+                else -> (45f - (durationRatio - 1.10f) * 35f).coerceAtLeast(30f)
+            }
+
+            // 2. Deep sleep % (up to 20 pts, target ~15-25%)
+            val deepScore = when {
+                deepPercent in 0.15f..0.25f -> 20f
+                deepPercent < 0.15f -> (deepPercent / 0.15f) * 20f
+                else -> 20f
+            }
+
+            // 3. REM sleep % (up to 20 pts, target ~20-25%)
+            val remScore = when {
+                remPercent in 0.20f..0.28f -> 20f
+                remPercent < 0.20f -> (remPercent / 0.20f) * 20f
+                else -> 18f
+            }
+
+            // 4. Efficiency & awakenings (up to 15 pts)
+            var efficiencyScore = when {
+                sleepEfficiency >= 0.90f -> 15f
+                sleepEfficiency >= 0.80f -> 12f
+                else -> (sleepEfficiency / 0.80f) * 10f
+            }
+            if (awakeningsCount > 2) {
+                efficiencyScore = (efficiencyScore - (awakeningsCount - 2) * 2f).coerceAtLeast(2f)
+            }
+
+            totalScore = (durationScore + deepScore + remScore + efficiencyScore)
+                .toInt()
+                .coerceIn(0, 100)
         }
-
-        val timeAsleepMinutes = (deepMins + lightMins + remMins).coerceAtLeast(1L)
-        val deepPercent = deepMins.toFloat() / timeAsleepMinutes.toFloat()
-        val remPercent = remMins.toFloat() / timeAsleepMinutes.toFloat()
-        val lightPercent = lightMins.toFloat() / timeAsleepMinutes.toFloat()
-        val awakePercent = awakeMins.toFloat() / totalBedTimeMinutes.toFloat()
-
-        val sleepEfficiency = (timeAsleepMinutes.toFloat() / totalBedTimeMinutes.toFloat()).coerceIn(0f, 1f)
-
-        // Sleep Score (0..100) Heuristic
-        // 1. Duration vs target (up to 45 pts)
-        val durationRatio = timeAsleepMinutes.toFloat() / targetDurationMinutes.toFloat()
-        val durationScore = when {
-            durationRatio in 0.95f..1.10f -> 45f
-            durationRatio < 0.95f -> (durationRatio / 0.95f) * 45f
-            else -> (45f - (durationRatio - 1.10f) * 35f).coerceAtLeast(30f)
-        }
-
-        // 2. Deep sleep % (up to 20 pts, target ~15-25%)
-        val deepScore = when {
-            deepPercent in 0.15f..0.25f -> 20f
-            deepPercent < 0.15f -> (deepPercent / 0.15f) * 20f
-            else -> 20f
-        }
-
-        // 3. REM sleep % (up to 20 pts, target ~20-25%)
-        val remScore = when {
-            remPercent in 0.20f..0.28f -> 20f
-            remPercent < 0.20f -> (remPercent / 0.20f) * 20f
-            else -> 18f
-        }
-
-        // 4. Efficiency & awakenings (up to 15 pts)
-        var efficiencyScore = when {
-            sleepEfficiency >= 0.90f -> 15f
-            sleepEfficiency >= 0.80f -> 12f
-            else -> (sleepEfficiency / 0.80f) * 10f
-        }
-        if (awakeningsCount > 2) {
-            efficiencyScore = (efficiencyScore - (awakeningsCount - 2) * 2f).coerceAtLeast(2f)
-        }
-
-        val totalScore = (durationScore + deepScore + remScore + efficiencyScore)
-            .toInt()
-            .coerceIn(0, 100)
 
         // Previous night comparison (using helper without recursive analyze calls)
         var deltaPrevScore: Int? = null
@@ -144,20 +159,24 @@ object SleepAnalyzer {
 
         // Feature 3: Stage quality tips based on deep% and REM% vs targets
         val tips = mutableListOf<String>()
-        if (deepPercent < 0.15f) {
-            tips.add("Deep sleep was below target (${(deepPercent * 100).toInt()}% vs 15–25%). Avoid caffeine, heavy food, or alcohol 3h before bed.")
+        if (session.stages.isEmpty()) {
+            tips.add("No sleep stage detail from the ring")
         } else {
-            tips.add("Optimal deep sleep (${(deepPercent * 100).toInt()}%), effectively supporting physical restoration and muscle repair.")
-        }
+            if (deepPercent < 0.15f) {
+                tips.add("Deep sleep was below target (${(deepPercent * 100).toInt()}% vs 15–25%). Avoid caffeine, heavy food, or alcohol 3h before bed.")
+            } else {
+                tips.add("Optimal deep sleep (${(deepPercent * 100).toInt()}%), effectively supporting physical restoration and muscle repair.")
+            }
 
-        if (remPercent < 0.20f) {
-            tips.add("REM sleep was lower than expected (${(remPercent * 100).toInt()}% vs 20–25%). Maintain a consistent wake schedule for complete sleep cycles.")
-        } else {
-            tips.add("Healthy REM sleep proportion (${(remPercent * 100).toInt()}%), aiding cognitive memory integration and emotional stability.")
-        }
+            if (remPercent < 0.20f) {
+                tips.add("REM sleep was lower than expected (${(remPercent * 100).toInt()}% vs 20–25%). Maintain a consistent wake schedule for complete sleep cycles.")
+            } else {
+                tips.add("Healthy REM sleep proportion (${(remPercent * 100).toInt()}%), aiding cognitive memory integration and emotional stability.")
+            }
 
-        if (awakePercent > 0.10f) {
-            tips.add("Wakefulness was elevated (${(awakePercent * 100).toInt()}%). Keep the sleeping environment quiet, cool, and dim.")
+            if (awakePercent > 0.10f) {
+                tips.add("Wakefulness was elevated (${(awakePercent * 100).toInt()}%). Keep the sleeping environment quiet, cool, and dim.")
+            }
         }
 
         // Overnight HR stats
@@ -215,8 +234,7 @@ object SleepAnalyzer {
             }
         }
         if (session.stages.isEmpty()) {
-            val total = session.durationMinutes.coerceAtLeast(1L)
-            return (total * 0.93).toLong().coerceAtLeast(1L)
+            return 0L
         }
         return (deep + light + rem).coerceAtLeast(1L)
     }
@@ -243,11 +261,7 @@ object SleepAnalyzer {
         }
 
         if (session.stages.isEmpty()) {
-            deepMins = (totalBedTimeMinutes * 0.22).toLong()
-            remMins = (totalBedTimeMinutes * 0.25).toLong()
-            awakeMins = (totalBedTimeMinutes * 0.07).toLong()
-            lightMins = totalBedTimeMinutes - deepMins - remMins - awakeMins
-            awakeningsCount = 1
+            return Pair(session.qualityScore ?: 0, 0L)
         }
 
         val timeAsleep = (deepMins + lightMins + remMins).coerceAtLeast(1L)

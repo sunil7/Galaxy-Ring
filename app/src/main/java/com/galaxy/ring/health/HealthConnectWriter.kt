@@ -87,18 +87,23 @@ class HealthConnectWriter(private val context: Context) {
     )
 
     fun isHealthConnectAvailable(): Boolean {
-        val status = HealthConnectClient.getSdkStatus(context)
-        return status == HealthConnectClient.SDK_AVAILABLE
+        return try {
+            val status = HealthConnectClient.getSdkStatus(context)
+            status == HealthConnectClient.SDK_AVAILABLE
+        } catch (e: Throwable) {
+            AppLog.w(tag, "Health Connect service not available: ${e.message}")
+            false
+        }
     }
 
     suspend fun hasAllPermissions(): Boolean {
-        val client = healthConnectClient ?: return false
         return try {
+            val client = healthConnectClient ?: return false
             val granted = client.permissionController.getGrantedPermissions()
             val allOk = granted.containsAll(corePermissions)
             AppLog.i(tag, "Health Connect permissions check: coreGranted=$allOk (granted count: ${granted.size}/${requiredPermissions.size})")
             allOk
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             AppLog.e(tag, "Error checking Health Connect permissions: ${e.message}", e)
             false
         }

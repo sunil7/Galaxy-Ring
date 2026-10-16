@@ -138,25 +138,18 @@ fun SleepScreen(
 
     val selectedNightEntity by repo.getSleepForDate(selectedDateStr).collectAsState(initial = null)
 
+    val segments = remember(selectedNightEntity) {
+        selectedNightEntity?.toSegments() ?: emptyList()
+    }
+
     // Build session from real Room records only
-    val sessionToAnalyze = remember(selectedNightEntity) {
+    val sessionToAnalyze = remember(selectedNightEntity, segments) {
         selectedNightEntity?.let { ent ->
-            val start = ent.startTime
-            val end = ent.endTime
-
-            val stages = listOf(
-                SleepStageRecord(SleepStage.LIGHT, start, start + (ent.lightMinutes / 2) * 60000L),
-                SleepStageRecord(SleepStage.DEEP, start + (ent.lightMinutes / 2) * 60000L, start + (ent.lightMinutes / 2 + ent.deepMinutes) * 60000L),
-                SleepStageRecord(SleepStage.REM, start + (ent.lightMinutes / 2 + ent.deepMinutes) * 60000L, start + (ent.lightMinutes / 2 + ent.deepMinutes + ent.remMinutes) * 60000L),
-                SleepStageRecord(SleepStage.LIGHT, start + (ent.lightMinutes / 2 + ent.deepMinutes + ent.remMinutes) * 60000L, end - ent.awakeMinutes * 60000L),
-                SleepStageRecord(SleepStage.AWAKE, end - ent.awakeMinutes * 60000L, end)
-            )
-
             SleepSession(
-                startTime = start,
-                endTime = end,
+                startTime = ent.startTime,
+                endTime = ent.endTime,
                 qualityScore = ent.sleepScore,
-                stages = stages
+                stages = segments.map { SleepStageRecord(it.stage, it.start, it.end) }
             )
         }
     }
@@ -179,13 +172,15 @@ fun SleepScreen(
     val prevNightEntity = recentSessions.firstOrNull { it.date == prevDateStr }
     val prevSession = remember(prevNightEntity) {
         prevNightEntity?.let {
-            SleepSession(it.startTime, it.endTime, it.sleepScore)
+            val segs = it.toSegments()
+            SleepSession(it.startTime, it.endTime, it.sleepScore, stages = segs.map { s -> SleepStageRecord(s.stage, s.start, s.end) })
         }
     }
 
     val past7Sessions = remember(recentSessions, selectedDateStr) {
         recentSessions.filter { it.date != selectedDateStr }.take(7).map {
-            SleepSession(it.startTime, it.endTime, it.sleepScore)
+            val segs = it.toSegments()
+            SleepSession(it.startTime, it.endTime, it.sleepScore, stages = segs.map { s -> SleepStageRecord(s.stage, s.start, s.end) })
         }
     }
 
@@ -378,7 +373,7 @@ fun SleepScreen(
 
                     // Feature 2: Hypnogram-Style Stage Timeline
                     item {
-                        HypnogramTimelineCard(session = sessionToAnalyze, analysis = analysis)
+                        HypnogramTimelineCard(segments = segments)
                     }
 
                     // Stage Bar & Target Breakdown
@@ -561,157 +556,35 @@ fun DayDateNavigationCard(
 }
 
 /**
- * Feature 2: Hypnogram-Style Stage Timeline.
- * Shows horizontal progression through Awake, REM, Light, and Deep stages over the course of the night.
+ * Feature 2: Hypnogram Stage Architecture using real ring segments.
  */
 @Composable
 fun HypnogramTimelineCard(
-    session: SleepSession,
-    analysis: com.galaxy.ring.data.SleepAnalysis
+    segments: List<com.galaxy.ring.data.SleepSegment>
 ) {
-    val timeFormat = SimpleDateFormat("h:mm a", Locale.US)
-    val startTimeStr = timeFormat.format(Date(session.startTime))
-    val endTimeStr = timeFormat.format(Date(session.endTime))
-
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(18.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Hypnogram Stage Architecture",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "$startTimeStr – $endTimeStr",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Text(
+                text = "Hypnogram Stage Architecture",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Hypnogram Canvas
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(140.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF0F172A))
-            ) {
-                Canvas(modifier = Modifier.fillMaxSize().padding(start = 54.dp, end = 16.dp, top = 12.dp, bottom = 24.dp)) {
-                    val w = size.width
-                    val h = size.height
-
-                    // 4 Stage Y-Levels:
-                    // Level 0: AWAKE (top, y=0)
-                    // Level 1: REM (y = h * 0.33)
-                    // Level 2: LIGHT (y = h * 0.66)
-                    // Level 3: DEEP (bottom, y = h)
-                    val yAwake = 0f
-                    val yRem = h * 0.33f
-                    val yLight = h * 0.66f
-                    val yDeep = h
-
-                    // Draw stage guideline levels
-                    listOf(yAwake, yRem, yLight, yDeep).forEach { y ->
-                        drawLine(
-                            color = Color.White.copy(alpha = 0.08f),
-                            start = Offset(0f, y),
-                            end = Offset(w, y),
-                            strokeWidth = 1.dp.toPx()
-                        )
-                    }
-
-                    // Draw step path through stages
-                    val totalDuration = (session.endTime - session.startTime).coerceAtLeast(1L).toFloat()
-                    val path = Path()
-
-                    var prevX = 0f
-                    var prevY = yLight
-
-                    if (session.stages.isNotEmpty()) {
-                        session.stages.forEachIndexed { index, rec ->
-                            val startX = ((rec.startTime - session.startTime) / totalDuration) * w
-                            val endX = ((rec.endTime - session.startTime) / totalDuration) * w
-                            val currentY = when (rec.stage) {
-                                SleepStage.AWAKE -> yAwake
-                                SleepStage.REM -> yRem
-                                SleepStage.LIGHT -> yLight
-                                SleepStage.DEEP -> yDeep
-                            }
-
-                            val stageColor = when (rec.stage) {
-                                SleepStage.AWAKE -> Color(0xFFF59E0B)
-                                SleepStage.REM -> Color(0xFFA855F7)
-                                SleepStage.LIGHT -> Color(0xFF64748B)
-                                SleepStage.DEEP -> Color(0xFF38BDF8)
-                            }
-
-                            if (index == 0) {
-                                path.moveTo(startX, currentY)
-                            } else {
-                                // Vertical step
-                                path.lineTo(startX, currentY)
-                            }
-                            // Horizontal step
-                            path.lineTo(endX, currentY)
-
-                            // Draw subtle colored underline for this stage block
-                            drawLine(
-                                color = stageColor,
-                                start = Offset(startX, currentY),
-                                end = Offset(endX, currentY),
-                                strokeWidth = 3.dp.toPx(),
-                                cap = StrokeCap.Round
-                            )
-
-                            prevX = endX
-                            prevY = currentY
-                        }
-
-                        // Outline path connecting stages
-                        drawPath(
-                            path = path,
-                            color = Color.White.copy(alpha = 0.7f),
-                            style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round)
-                        )
-                    }
-                }
-
-                // Stage Labels on Left Axis
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(start = 12.dp, top = 8.dp, bottom = 22.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Awake", style = MaterialTheme.typography.labelSmall, color = Color(0xFFF59E0B), fontSize = 10.sp)
-                    Text("REM", style = MaterialTheme.typography.labelSmall, color = Color(0xFFA855F7), fontSize = 10.sp)
-                    Text("Light", style = MaterialTheme.typography.labelSmall, color = Color(0xFF94A3B8), fontSize = 10.sp)
-                    Text("Deep", style = MaterialTheme.typography.labelSmall, color = Color(0xFF38BDF8), fontSize = 10.sp)
-                }
-
-                // Time Labels along bottom
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                        .padding(start = 54.dp, end = 16.dp, bottom = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(startTimeStr, style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
-                    Text("Mid-Night", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
-                    Text(endTimeStr, style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
-                }
+            if (segments.isEmpty()) {
+                Text(
+                    text = "No sleep stage detail from the ring (no synthetic stages) until the ring is re-synced.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                SleepHypnogram(segments = segments)
             }
         }
     }
@@ -2139,35 +2012,43 @@ fun SleepStagesCard(session: SleepSession, analysis: com.galaxy.ring.data.SleepA
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Multi-segment timeline bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(20.dp)
-                    .clip(RoundedCornerShape(10.dp))
-            ) {
-                val deepW = analysis.deepPercent.coerceAtLeast(0.05f)
-                val remW = analysis.remPercent.coerceAtLeast(0.05f)
-                val lightW = analysis.lightPercent.coerceAtLeast(0.05f)
-                val awakeW = analysis.awakePercent.coerceAtLeast(0.02f)
+            if (session.stages.isEmpty()) {
+                Text(
+                    text = "No sleep stage detail from the ring (no synthetic stages) until the ring is re-synced.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                // Multi-segment timeline bar
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(20.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                ) {
+                    val deepW = analysis.deepPercent.coerceAtLeast(0.05f)
+                    val remW = analysis.remPercent.coerceAtLeast(0.05f)
+                    val lightW = analysis.lightPercent.coerceAtLeast(0.05f)
+                    val awakeW = analysis.awakePercent.coerceAtLeast(0.02f)
 
-                Box(modifier = Modifier.weight(deepW).fillMaxSize().background(Color(0xFF38BDF8)))
-                Box(modifier = Modifier.weight(remW).fillMaxSize().background(Color(0xFFA855F7)))
-                Box(modifier = Modifier.weight(lightW).fillMaxSize().background(Color(0xFF64748B)))
-                Box(modifier = Modifier.weight(awakeW).fillMaxSize().background(Color(0xFFF59E0B)))
-            }
+                    Box(modifier = Modifier.weight(deepW).fillMaxSize().background(Color(0xFF38BDF8)))
+                    Box(modifier = Modifier.weight(remW).fillMaxSize().background(Color(0xFFA855F7)))
+                    Box(modifier = Modifier.weight(lightW).fillMaxSize().background(Color(0xFF64748B)))
+                    Box(modifier = Modifier.weight(awakeW).fillMaxSize().background(Color(0xFFF59E0B)))
+                }
 
-            Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-            // Stage details
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                StageMetric(color = Color(0xFF38BDF8), name = "Deep", mins = analysis.deepMinutes, pct = (analysis.deepPercent * 100).toInt(), target = "15–25%")
-                StageMetric(color = Color(0xFFA855F7), name = "REM", mins = analysis.remMinutes, pct = (analysis.remPercent * 100).toInt(), target = "20–25%")
-                StageMetric(color = Color(0xFF64748B), name = "Light", mins = analysis.lightMinutes, pct = (analysis.lightPercent * 100).toInt(), target = "45–55%")
-                StageMetric(color = Color(0xFFF59E0B), name = "Awake", mins = analysis.awakeMinutes, pct = (analysis.awakePercent * 100).toInt(), target = "<10%")
+                // Stage details
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    StageMetric(color = Color(0xFF38BDF8), name = "Deep", mins = analysis.deepMinutes, pct = (analysis.deepPercent * 100).toInt(), target = "15–25%")
+                    StageMetric(color = Color(0xFFA855F7), name = "REM", mins = analysis.remMinutes, pct = (analysis.remPercent * 100).toInt(), target = "20–25%")
+                    StageMetric(color = Color(0xFF64748B), name = "Light", mins = analysis.lightMinutes, pct = (analysis.lightPercent * 100).toInt(), target = "45–55%")
+                    StageMetric(color = Color(0xFFF59E0B), name = "Awake", mins = analysis.awakeMinutes, pct = (analysis.awakePercent * 100).toInt(), target = "<10%")
+                }
             }
         }
     }
