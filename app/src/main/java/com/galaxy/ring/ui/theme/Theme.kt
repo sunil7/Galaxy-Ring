@@ -12,18 +12,6 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-// Futuristic Galaxy Ring Color Palette
-val CyberCyan = Color(0xFF38BDF8)
-val NeonEmerald = Color(0xFF10B981)
-val ElectricViolet = Color(0xFFA855F7)
-val AmberGlow = Color(0xFFF59E0B)
-val RosePulse = Color(0xFFF43F5E)
-
-val DarkBackground = Color(0xFF090D16)
-val DarkSurface = Color(0xFF111827)
-val DarkSurfaceVariant = Color(0xFF1F293D)
-val DarkCardBorder = Color(0xFF334155)
-
 private val DarkColorScheme = darkColorScheme(
     primary = CyberCyan,
     onPrimary = Color(0xFF021B2D),
@@ -76,6 +64,7 @@ fun GalaxyRingTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
+        typography = Typography,
         content = content
     )
 }

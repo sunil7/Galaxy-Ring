@@ -1,6 +1,6 @@
 # Agent Queue
 
-[~] A1 ui/theme: colors/type + composables MetricCard, EmptyState, SectionHeader only (agent 2026-10-16 03:20 UTC)
+[x] A1 ui/theme: colors/type + composables MetricCard, EmptyState, SectionHeader only
 [ ] A2 Bottom nav: Home|Sleep|Heart|Activity|More wiring to existing screens (no data rewrite)
 [ ] A3 Restyle Home only: status pill + cards for steps, last HR, last SpO2, last sleep (real DB or empty)
 [ ] B1 SleepScreen: entity.toSegments() + SleepHypnogram(segments); no Light→Deep→REM invention; empty stagesJson → EmptyState
