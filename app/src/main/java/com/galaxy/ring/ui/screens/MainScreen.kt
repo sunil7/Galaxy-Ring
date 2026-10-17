@@ -16,6 +16,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -120,10 +121,15 @@ import com.galaxy.ring.data.StressSample
 import com.galaxy.ring.data.SyncStatus
 import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
+import com.galaxy.ring.ui.theme.EmptyState
+import com.galaxy.ring.ui.theme.MetricCard
 import com.galaxy.ring.ui.theme.NeonEmerald
 import com.galaxy.ring.ui.theme.RosePulse
 import kotlinx.coroutines.launch
+import java.text.NumberFormat
+import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -303,6 +309,8 @@ fun MainScreen(
                         onRequestPermissions = onRequestHealthPermissions,
                         onOpenRationale = onOpenRationale,
                         onNavigateToSleep = { selectedTab = 1 },
+                        onNavigateToHeart = { selectedTab = 2 },
+                        onNavigateToActivity = { selectedTab = 3 },
                         onOpenAdmin = { showAdminScreen = true }
                     )
                 }
@@ -397,9 +405,20 @@ fun DeviceDashboard(
     onRequestPermissions: () -> Unit,
     onOpenRationale: () -> Unit,
     onNavigateToSleep: () -> Unit,
+    onNavigateToHeart: () -> Unit = {},
+    onNavigateToActivity: () -> Unit = {},
     onOpenAdmin: () -> Unit = {}
 ) {
-    val isReady = connectionState is ConnectionState.Ready || connectionState is ConnectionState.Connected
+    val app = GalaxyRingApp.instance
+    val repo = app.healthRepository
+
+    val todayDateStr = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) }
+    val todayStepsEntity by repo.getDailySteps(todayDateStr).collectAsState(initial = null)
+    val latestHrEntity by repo.getLatestHeartRate().collectAsState(initial = null)
+    val latestSpo2Entity by repo.getLatestSpo2().collectAsState(initial = null)
+    val latestSleepEntity by repo.getLatestSleepSession().collectAsState(initial = null)
+
+    val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.US) }
 
     LazyColumn(
         modifier = Modifier
@@ -409,129 +428,293 @@ fun DeviceDashboard(
     ) {
         item { Spacer(modifier = Modifier.height(4.dp)) }
 
-        // 1. Connection Status Banner
+        // 1. Status Pill with primary CTA (Connect or Sync)
         item {
-            ConnectionStatusBanner(
+            RingStatusPill(
                 connectionState = connectionState,
-                onOpenAdmin = onOpenAdmin
-            )
-        }
-
-        // 2. Interactive Ring Hero Card
-        item {
-            RingHeroCard(
-                connectionState = connectionState,
-                snapshot = snapshot,
-                isFindingRing = isFindingRing,
-                onFindMyRing = onFindMyRing,
+                batteryPercentage = snapshot.battery.level,
+                isSyncing = isSyncing,
                 onConnectClick = onConnectClick,
-                onSyncFromRing = onSyncFromRing,
-                isSyncing = isSyncing,
-                syncProgressText = syncProgressText
+                onSyncClick = onSyncFromRing
             )
         }
 
-        // 2b. Primary Telemetry Sync Card
+        // 2. Steps Card
         item {
-            RingSyncCard(
-                isReady = connectionState is ConnectionState.Ready,
-                isSyncing = isSyncing,
-                syncProgressText = syncProgressText,
-                lastSyncTime = snapshot.lastSyncTimestamp,
-                onSyncFromRing = onSyncFromRing
-            )
+            val stepCount = todayStepsEntity?.steps ?: snapshot.steps.totalSteps
+            val calories = todayStepsEntity?.caloriesKcal ?: snapshot.steps.caloriesKcal
+            val distanceM = todayStepsEntity?.distanceMeters ?: snapshot.steps.distanceMeters
+
+            if (stepCount > 0L) {
+                val distKm = String.format(Locale.US, "%.1f", distanceM / 1000.0)
+                MetricCard(
+                    title = "Steps",
+                    value = NumberFormat.getIntegerInstance().format(stepCount),
+                    unit = "steps",
+                    subtitle = "Goal: 10,000 • $calories kcal • $distKm km",
+                    icon = Icons.AutoMirrored.Filled.DirectionsWalk,
+                    accentColor = CyberCyan,
+                    onClick = onNavigateToActivity,
+                    testTag = "home_steps_card"
+                )
+            } else {
+                EmptyState(
+                    message = "No steps recorded today",
+                    icon = Icons.AutoMirrored.Filled.DirectionsWalk,
+                    testTag = "home_steps_empty"
+                )
+            }
         }
 
-        // 3. Four Prominent Manual Measurement Buttons (Heart Rate, SpO₂, HRV, Stress)
+        // 3. Last HR Card
         item {
-            ManualMeasurementsCard(
-                isReady = isReady,
-                measurementState = measurementState,
-                latestHeartRate = snapshot.latestHeartRate,
-                latestSpo2 = snapshot.latestOxygenSaturation,
-                latestHrv = snapshot.latestHrv,
-                latestStress = snapshot.latestStress,
-                onMeasureHeartRate = onMeasureHeartRate,
-                onMeasureSpo2 = onMeasureSpo2,
-                onMeasureHrv = onMeasureHrv,
-                onMeasureStress = onMeasureStress,
-                onOpenAdmin = onOpenAdmin
-            )
+            val hrBpm = latestHrEntity?.bpm ?: snapshot.latestHeartRate?.bpm
+            val hrTimestamp = latestHrEntity?.timestamp ?: snapshot.latestHeartRate?.timestamp
+
+            if (hrBpm != null && hrBpm > 0 && hrTimestamp != null) {
+                val hrTime = timeFormatter.format(Date(hrTimestamp))
+                MetricCard(
+                    title = "Heart Rate",
+                    value = hrBpm.toString(),
+                    unit = "bpm",
+                    subtitle = "Last measured $hrTime",
+                    icon = Icons.Default.Favorite,
+                    accentColor = RosePulse,
+                    onClick = onNavigateToHeart,
+                    testTag = "home_heart_card"
+                )
+            } else {
+                EmptyState(
+                    message = "No heart rate recorded yet",
+                    icon = Icons.Default.Favorite,
+                    testTag = "home_heart_empty"
+                )
+            }
         }
 
-        // 4. Sleep Goal Progress Ring Banner
+        // 4. Last SpO2 Card
         item {
-            SleepGoalProgressRingCard(
-                snapshot = snapshot,
-                onCardClick = onNavigateToSleep
-            )
+            val spo2Val = latestSpo2Entity?.percentage ?: snapshot.latestOxygenSaturation?.percentage
+            val spo2Timestamp = latestSpo2Entity?.timestamp ?: snapshot.latestOxygenSaturation?.timestamp
+
+            if (spo2Val != null && spo2Val > 0 && spo2Timestamp != null) {
+                val spo2Time = timeFormatter.format(Date(spo2Timestamp))
+                MetricCard(
+                    title = "Blood Oxygen",
+                    value = spo2Val.toInt().toString(),
+                    unit = "%",
+                    subtitle = "Last measured $spo2Time",
+                    icon = Icons.Default.Bloodtype,
+                    accentColor = CyberCyan,
+                    onClick = onNavigateToHeart,
+                    testTag = "home_spo2_card"
+                )
+            } else {
+                EmptyState(
+                    message = "No SpO₂ recorded yet",
+                    icon = Icons.Default.Bloodtype,
+                    testTag = "home_spo2_empty"
+                )
+            }
         }
 
-        // 5. Health Connect Sync Card
+        // 5. Last Sleep Card
         item {
-            HealthConnectSyncCard(
-                hasPermissions = hasHealthPermissions,
-                syncStatus = syncStatus,
-                lastSyncTime = snapshot.lastSyncTimestamp,
-                onSyncNow = onSyncNow,
-                onRequestPermissions = onRequestPermissions,
-                onOpenRationale = onOpenRationale
-            )
-        }
-
-        // 6. Heart Rate Card with Live Pulse & Waveform
-        item {
-            HeartRateCard(
-                latestSample = snapshot.latestHeartRate,
-                history = snapshot.heartRateHistory
-            )
-        }
-
-        // 7. SpO₂ Blood Oxygen Card
-        item {
-            Spo2Card(
-                latestSample = snapshot.latestOxygenSaturation,
-                history = snapshot.oxygenSaturationHistory
-            )
-        }
-
-        // 7b. HRV Card
-        item {
-            HrvCard(
-                latestSample = snapshot.latestHrv,
-                history = snapshot.hrvHistory
-            )
-        }
-
-        // 7c. Stress Card
-        item {
-            StressCard(
-                latestSample = snapshot.latestStress,
-                history = snapshot.stressHistory
-            )
-        }
-
-        // 8. Daily Steps Card
-        item {
-            StepsCard(steps = snapshot.steps)
-        }
-
-        // 9. Split Grid: Skin Temp & Battery
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Box(modifier = Modifier.weight(1f)) {
-                    SkinTempCard(temp = snapshot.temperature)
-                }
-                Box(modifier = Modifier.weight(1f)) {
-                    BatteryCard(battery = snapshot.battery)
-                }
+            val sleepSession = latestSleepEntity
+            if (sleepSession != null && sleepSession.endTime > sleepSession.startTime) {
+                val durationMs = sleepSession.endTime - sleepSession.startTime
+                val hours = (durationMs / 3600000L).toInt()
+                val mins = ((durationMs % 3600000L) / 60000L).toInt()
+                val scoreSub = if (sleepSession.sleepScore > 0) "Score: ${sleepSession.sleepScore} • ${sleepSession.date}" else sleepSession.date
+                MetricCard(
+                    title = "Sleep",
+                    value = "${hours}h ${mins}m",
+                    unit = "",
+                    subtitle = scoreSub,
+                    icon = Icons.Default.Nightlight,
+                    accentColor = ElectricViolet,
+                    onClick = onNavigateToSleep,
+                    testTag = "home_sleep_card"
+                )
+            } else if (snapshot.latestSleep != null && snapshot.latestSleep.endTime > snapshot.latestSleep.startTime) {
+                val durationMs = snapshot.latestSleep.endTime - snapshot.latestSleep.startTime
+                val hours = (durationMs / 3600000L).toInt()
+                val mins = ((durationMs % 3600000L) / 60000L).toInt()
+                MetricCard(
+                    title = "Sleep",
+                    value = "${hours}h ${mins}m",
+                    unit = "",
+                    subtitle = "Recent session",
+                    icon = Icons.Default.Nightlight,
+                    accentColor = ElectricViolet,
+                    onClick = onNavigateToSleep,
+                    testTag = "home_sleep_card"
+                )
+            } else {
+                EmptyState(
+                    message = "No sleep recorded yet",
+                    icon = Icons.Default.Nightlight,
+                    testTag = "home_sleep_empty"
+                )
             }
         }
 
         item { Spacer(modifier = Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+fun RingStatusPill(
+    connectionState: ConnectionState,
+    batteryPercentage: Int?,
+    isSyncing: Boolean,
+    onConnectClick: () -> Unit,
+    onSyncClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isConnected = connectionState is ConnectionState.Ready || connectionState is ConnectionState.Connected
+    val isConnecting = connectionState is ConnectionState.Connecting || connectionState is ConnectionState.Scanning
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("home_status_pill"),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Status Indicator & Device info
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                when {
+                    isConnected -> {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(NeonEmerald)
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Galaxy Ring",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            if (batteryPercentage != null) {
+                                Text(
+                                    text = " • $batteryPercentage%",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    isConnecting -> {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(12.dp),
+                            strokeWidth = 2.dp,
+                            color = CyberCyan
+                        )
+                        Text(
+                            text = "Connecting to Galaxy Ring...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    else -> {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF64748B))
+                        )
+                        Text(
+                            text = "Galaxy Ring • Disconnected",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            // Primary CTA
+            when {
+                isConnected -> {
+                    Button(
+                        onClick = onSyncClick,
+                        enabled = !isSyncing,
+                        modifier = Modifier
+                            .height(36.dp)
+                            .testTag("home_sync_cta"),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CyberCyan,
+                            contentColor = Color(0xFF021B2D)
+                        ),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        if (isSyncing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                                color = Color(0xFF021B2D)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Syncing",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Sync,
+                                contentDescription = "Sync",
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Sync",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+                isConnecting -> {
+                    // connecting state indicator
+                }
+                else -> {
+                    Button(
+                        onClick = onConnectClick,
+                        modifier = Modifier
+                            .height(36.dp)
+                            .testTag("home_connect_cta"),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CyberCyan,
+                            contentColor = Color(0xFF021B2D)
+                        ),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "Connect",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

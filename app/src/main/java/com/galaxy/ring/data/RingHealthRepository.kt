@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.galaxy.ring.debug.AppLog
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -354,6 +355,13 @@ class RingHealthRepository(private val context: Context) {
 
     fun getSleepSessionsInRange(startTime: Long, endTime: Long): Flow<List<SleepSessionEntity>> =
         sleepDao.getSleepSessionsInRange(startTime, endTime)
+
+    fun getLatestHeartRate(): Flow<HeartRateEntity?> = hrDao.getLatestSample()
+
+    fun getLatestSpo2(): Flow<OxygenSaturationEntity?> = spo2Dao.getLatestSample()
+
+    fun getLatestSleepSession(): Flow<SleepSessionEntity?> =
+        sleepDao.getRecentSleepSessions(1).map { it.firstOrNull() }
 
     suspend fun saveManualSleepSession(dateStr: String, startTime: Long, endTime: Long): Long {
         val durationMinutes = ((endTime - startTime) / 60000L).coerceAtLeast(30L)
