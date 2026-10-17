@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.BatteryAlert
@@ -44,6 +45,8 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Refresh
@@ -216,10 +219,11 @@ fun MainScreen(
                 tonalElevation = 8.dp
             ) {
                 val items = listOf(
-                    Triple(0, "Device", Icons.Default.Watch),
-                    Triple(1, "History", Icons.Default.History),
-                    Triple(2, "Sleep", Icons.Default.Nightlight),
-                    Triple(3, "Settings", Icons.Default.Settings)
+                    Triple(0, "Home", Icons.Default.Home),
+                    Triple(1, "Sleep", Icons.Default.Nightlight),
+                    Triple(2, "Heart", Icons.Default.Favorite),
+                    Triple(3, "Activity", Icons.AutoMirrored.Filled.DirectionsWalk),
+                    Triple(4, "More", Icons.Default.MoreHoriz)
                 )
 
                 items.forEach { (index, title, icon) ->
@@ -229,6 +233,7 @@ fun MainScreen(
                         onClick = { selectedTab = index },
                         icon = { Icon(imageVector = icon, contentDescription = title) },
                         label = { Text(title) },
+                        modifier = Modifier.testTag("nav_${title.lowercase()}"),
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = Color(0xFF0F172A),
                             selectedTextColor = CyberCyan,
@@ -243,6 +248,10 @@ fun MainScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
+        BackHandler(enabled = selectedTab != 0) {
+            selectedTab = 0
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -250,7 +259,7 @@ fun MainScreen(
         ) {
             when (selectedTab) {
                 0 -> {
-                    // Device / Home Dashboard
+                    // Home Dashboard
                     DeviceDashboard(
                         connectionState = connectionState,
                         snapshot = snapshot,
@@ -293,25 +302,36 @@ fun MainScreen(
                         syncProgressText = syncProgressMsg,
                         onRequestPermissions = onRequestHealthPermissions,
                         onOpenRationale = onOpenRationale,
-                        onNavigateToSleep = { selectedTab = 2 },
+                        onNavigateToSleep = { selectedTab = 1 },
                         onOpenAdmin = { showAdminScreen = true }
                     )
                 }
                 1 -> {
-                    HistoryScreen(
-                        onSyncFromRing = handleSyncFromRing,
-                        isSyncing = isSyncing,
-                        syncProgressText = syncProgressMsg
-                    )
-                }
-                2 -> {
+                    // Sleep Screen
                     SleepScreen(
                         onSyncFromRing = handleSyncFromRing,
                         isSyncing = isSyncing,
                         syncProgressText = syncProgressMsg
                     )
                 }
+                2 -> {
+                    // Heart Screen
+                    HeartScreen(
+                        onSyncFromRing = handleSyncFromRing,
+                        isSyncing = isSyncing,
+                        syncProgressText = syncProgressMsg
+                    )
+                }
                 3 -> {
+                    // Activity Screen
+                    ActivityScreen(
+                        onSyncFromRing = handleSyncFromRing,
+                        isSyncing = isSyncing,
+                        syncProgressText = syncProgressMsg
+                    )
+                }
+                4 -> {
+                    // More (Settings & Ring Config)
                     SettingsScreen(
                         onOpenHealthRationale = onOpenRationale,
                         hasHealthPermissions = hasHealthPermissions,

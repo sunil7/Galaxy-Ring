@@ -1,0 +1,164 @@
+package com.galaxy.ring.ui.screens
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.galaxy.ring.GalaxyRingApp
+import com.galaxy.ring.ui.theme.CyberCyan
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
+
+@Composable
+fun HeartScreen(
+    onSyncFromRing: () -> Unit = {},
+    isSyncing: Boolean = false,
+    syncProgressText: String? = null
+) {
+    val app = GalaxyRingApp.instance
+    val repo = app.healthRepository
+
+    var selectedCalendar by remember { mutableStateOf(Calendar.getInstance()) }
+    val dayHrSamples by repo.getHeartRateForDay(selectedCalendar.time).collectAsState(initial = emptyList())
+    val daySpo2Samples by repo.getSpo2ForDay(selectedCalendar.time).collectAsState(initial = emptyList())
+    val dayHrvSamples by repo.getHrvForDay(selectedCalendar.time).collectAsState(initial = emptyList())
+    val dayStressSamples by repo.getStressForDay(selectedCalendar.time).collectAsState(initial = emptyList())
+    val scheduleInterval = repo.scheduleIntervalMinutes
+
+    val friendlyDateStr = remember(selectedCalendar.timeInMillis) {
+        SimpleDateFormat("EEE, MMM d, yyyy", Locale.US).format(selectedCalendar.time)
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item { Spacer(modifier = Modifier.height(8.dp)) }
+
+        // Date Selector Bar
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = {
+                            val prev = (selectedCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -1) }
+                            selectedCalendar = prev
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Previous Day",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CalendarMonth,
+                            contentDescription = null,
+                            tint = CyberCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = friendlyDateStr,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    IconButton(
+                        onClick = {
+                            val next = (selectedCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, 1) }
+                            selectedCalendar = next
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "Next Day",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        }
+
+        // Heart Rate Day Timeline Card
+        item {
+            HeartRateDayTimelineCard(
+                samples = dayHrSamples,
+                scheduleIntervalMinutes = scheduleInterval,
+                selectedCalendar = selectedCalendar
+            )
+        }
+
+        // SpO2 Day Timeline Card
+        item {
+            Spo2DayTimelineCard(
+                samples = daySpo2Samples,
+                scheduleIntervalMinutes = scheduleInterval,
+                selectedCalendar = selectedCalendar
+            )
+        }
+
+        // HRV Day Timeline Card
+        item {
+            HrvDayTimelineCard(
+                samples = dayHrvSamples,
+                selectedCalendar = selectedCalendar
+            )
+        }
+
+        // Stress Day Timeline Card
+        item {
+            StressDayTimelineCard(
+                samples = dayStressSamples,
+                selectedCalendar = selectedCalendar
+            )
+        }
+
+        item { Spacer(modifier = Modifier.height(32.dp)) }
+    }
+}
