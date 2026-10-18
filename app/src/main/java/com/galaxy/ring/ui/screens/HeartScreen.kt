@@ -31,6 +31,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.galaxy.ring.GalaxyRingApp
+import com.galaxy.ring.data.MonitorMetric
+import com.galaxy.ring.data.MonitoringSettings
+import com.galaxy.ring.data.toMetricPoint
 import com.galaxy.ring.ui.theme.CyberCyan
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -125,13 +128,36 @@ fun HeartScreen(
             }
         }
 
-        // Heart Rate Day Timeline Card
+        // Heart Rate Day Detail Panel
         item {
-            HeartRateDayTimelineCard(
-                samples = dayHrSamples,
-                scheduleIntervalMinutes = scheduleInterval,
-                selectedCalendar = selectedCalendar
-            )
+            val settings = remember { MonitoringSettings(app) }
+            var hrConfig by remember { mutableStateOf(settings.config(MonitorMetric.HEART_RATE)) }
+            val hrPoints = remember(dayHrSamples) { dayHrSamples.map { it.toMetricPoint() } }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                MetricDetailPanel(
+                    title = "Heart Rate",
+                    unit = "BPM",
+                    points = hrPoints,
+                    modifier = Modifier.padding(16.dp),
+                    monitoringLabel = "All-day Heart Rate",
+                    monitoringEnabled = hrConfig.enabled,
+                    intervalMinutes = hrConfig.intervalMin,
+                    onMonitoringEnabledChange = { enabled ->
+                        settings.setEnabled(MonitorMetric.HEART_RATE, enabled)
+                        hrConfig = settings.config(MonitorMetric.HEART_RATE)
+                    },
+                    onIntervalChange = { interval ->
+                        settings.setIntervalMin(MonitorMetric.HEART_RATE, interval)
+                        hrConfig = settings.config(MonitorMetric.HEART_RATE)
+                    },
+                    valueFormat = { it.toInt().toString() }
+                )
+            }
         }
 
         // SpO2 Day Timeline Card
