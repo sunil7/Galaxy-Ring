@@ -96,6 +96,17 @@ object Protocol {
     const val KEY_SMOKING_DETAIL_DATA: Int = 0x051B // Official SDK DHBleCommandEnums.h: smoking data, NOT sleep
     const val KEY_SCREEN_CONTROL: Int = 0x0285     // Official SDK DHBleCommandEnums.h: BLE_KEY_SCREEN_CONTROL [0x00]=off, [0x01]=on
 
+    // History Read Keys (READ flag 0x10)
+    const val KEY_HISTORY_HR: Int = 0x0503
+    const val KEY_HISTORY_SPO2: Int = 0x0509
+    const val KEY_HISTORY_HRV: Int = 0x050A
+    const val KEY_HISTORY_STRESS: Int = 0x050D
+
+    const val KEY_HR_HISTORY: Int = KEY_HISTORY_HR
+    const val KEY_SPO2_HISTORY: Int = KEY_HISTORY_SPO2
+    const val KEY_HRV_HISTORY: Int = KEY_HISTORY_HRV
+    const val KEY_STRESS_HISTORY: Int = KEY_HISTORY_STRESS
+
     // Measurement Types for Key 0x0609
     const val MEASURE_TYPE_HR: Byte = 0x03.toByte()
     const val MEASURE_TYPE_SPO2: Byte = 0x09.toByte()
@@ -442,6 +453,24 @@ object Protocol {
             data = byteArrayOf()
         )
     }
+
+    /**
+     * History read command for keys 0x0503 (HR), 0x0509 (SpO2), 0x050A (HRV), 0x050D (Stress).
+     * Uses encodeFrame with FLAG_COMMAND (0x01) and KEY_FLAG_READ (0x10).
+     */
+    fun buildHistoryRead(key: Int): ByteArray {
+        return encodeFrame(
+            flag = FLAG_COMMAND,
+            key = key,
+            keyFlag = KEY_FLAG_READ,
+            data = byteArrayOf()
+        )
+    }
+
+    fun buildHistoryReadHr(): ByteArray = buildHistoryRead(KEY_HISTORY_HR)
+    fun buildHistoryReadSpo2(): ByteArray = buildHistoryRead(KEY_HISTORY_SPO2)
+    fun buildHistoryReadHrv(): ByteArray = buildHistoryRead(KEY_HISTORY_HRV)
+    fun buildHistoryReadStress(): ByteArray = buildHistoryRead(KEY_HISTORY_STRESS)
 
     /**
      * Parses an incoming buffer of bytes from characteristic 0xB003.

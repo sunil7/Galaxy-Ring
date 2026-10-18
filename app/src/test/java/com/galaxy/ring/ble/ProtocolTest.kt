@@ -494,4 +494,36 @@ class ProtocolTest {
         assertFalse(stressCandidates.contains(0x03.toByte()))
         assertFalse(stressCandidates.contains(0x09.toByte()))
     }
+
+    @Test
+    fun testHistoryConstantsAndBuildHistoryRead() {
+        assertEquals(0x0503, Protocol.KEY_HISTORY_HR)
+        assertEquals(0x0509, Protocol.KEY_HISTORY_SPO2)
+        assertEquals(0x050A, Protocol.KEY_HISTORY_HRV)
+        assertEquals(0x050D, Protocol.KEY_HISTORY_STRESS)
+
+        val keys = listOf(
+            Protocol.KEY_HISTORY_HR,
+            Protocol.KEY_HISTORY_SPO2,
+            Protocol.KEY_HISTORY_HRV,
+            Protocol.KEY_HISTORY_STRESS
+        )
+
+        for (k in keys) {
+            val cmd = Protocol.buildHistoryRead(k)
+            assertEquals(0xAB.toByte(), cmd[0])
+            assertEquals(Protocol.FLAG_COMMAND, cmd[1])
+
+            val (frames, remainder) = Protocol.parseFramesFromStream(cmd)
+            assertEquals(1, frames.size)
+            assertEquals(0, remainder.size)
+
+            val frame = frames[0]
+            assertEquals(Protocol.FLAG_COMMAND, frame.flag)
+            assertEquals(k, frame.key)
+            assertEquals(Protocol.KEY_FLAG_READ, frame.keyFlag)
+            assertEquals(0, frame.data.size)
+            assertTrue(frame.crcOk)
+        }
+    }
 }
