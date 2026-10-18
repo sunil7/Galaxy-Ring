@@ -5,7 +5,7 @@
 [x] A3 Restyle Home only: status pill + cards for steps, last HR, last SpO2, last sleep (real DB or empty)
 [x] B1 SleepScreen: entity.toSegments() + SleepHypnogram(segments); no Light→Deep→REM invention; empty stagesJson → EmptyState
 [x] B2 SleepAnalyzer: stages empty → all stage minutes 0 (delete 22/25/7% fake split)
-[~] C1 Protocol: constants + buildHistoryRead for 0x0503/0509/050A/050D (encodeFrame + READ 0x10 only) (agent 2026-10-17 05:45 UTC)
+[x] C1 Protocol: constants + buildHistoryRead for 0x0503/0509/050A/050D (encodeFrame + READ 0x10 only)
 [ ] C2 Sync path: request HRV+Stress history; parse real samples → Room; log if empty (no fakes)
 [ ] C3 Heart day UI: MetricDetailPanel + timed HR list for selected day
 [ ] C4 SpO2 day UI: same pattern
