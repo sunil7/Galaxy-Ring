@@ -213,28 +213,6 @@ class BleRepository(
             }
         }
 
-        // 4b. Observe HRV samples
-        scope.launch {
-            bleManager.hrvSampleFlow.collect { sample ->
-                AppLog.i(tagBle, "HRV sample received from BLEManager: ${sample.value} ms")
-                healthRepository.saveHrv(sample.value, sample.timestamp, isManual = false)
-                _snapshot.value = _snapshot.value.copy(
-                    latestHrv = HrvSample(hrvMs = sample.value, timestamp = sample.timestamp)
-                )
-            }
-        }
-
-        // 4c. Observe Stress samples
-        scope.launch {
-            bleManager.stressSampleFlow.collect { sample ->
-                AppLog.i(tagBle, "Stress sample received from BLEManager: ${sample.value}")
-                healthRepository.saveStress(sample.value, sample.timestamp, isManual = false)
-                _snapshot.value = _snapshot.value.copy(
-                    latestStress = StressSample(score = sample.value, timestamp = sample.timestamp)
-                )
-            }
-        }
-
         // 5. Observe Initialization Sequence Progress
         scope.launch {
             bleManager.initState.collect { state ->
@@ -1303,26 +1281,24 @@ class BleRepository(
             // Cancel if disconnected
             if (currentGatt == null || _connectionState.value is ConnectionState.Disconnected) {
                 AppLog.w(tagSync, "Ring disconnected during sleep sync. Aborting remaining sync.")
-                return SyncResult(success = false, steps = stepsCount, message = "Ring disconnected mid-sync", hcStatus = "Disconnected")
+                return SyncResult(success = false, steps = stepsCount, hasSleep = sleepSession != null, sleepMinutes = sleepSession?.durationMinutes ?: 0L, message = "Ring disconnected mid-sync", hcStatus = "Disconnected")
             }
 
             // C) HRV history query (0x050A)
-            _syncProgressMessage.value = "Syncing HRV history (0x050A)..."
+            _syncProgressMessage.value = "Syncing HRV (0x050A)..."
             AppLog.i(tagSync, "C) Requesting HRV history from ring (0x050A)...")
             val hrvSamples = bleManager.fetchHrvHistory(gatt)
             if (hrvSamples.isNotEmpty()) {
                 for (sample in hrvSamples) {
-                    healthRepository.saveHrv(sample.value, sample.timestamp, isManual = false)
+                    healthRepository.saveHrv(hrvMs = sample.value, timestamp = sample.timestamp, isManual = false)
                 }
-                val latest = hrvSamples.maxByOrNull { it.timestamp }
-                if (latest != null) {
-                    _snapshot.value = _snapshot.value.copy(
-                        latestHrv = HrvSample(hrvMs = latest.value, timestamp = latest.timestamp)
-                    )
+                val latestHrvSample = hrvSamples.maxByOrNull { it.timestamp }?.let { HrvSample(it.value, it.timestamp) }
+                if (latestHrvSample != null) {
+                    _snapshot.value = _snapshot.value.copy(latestHrv = latestHrvSample)
                 }
-                AppLog.i(tagSync, "HRV history sync completed: ${hrvSamples.size} sample(s) saved to Room")
+                AppLog.i(tagSync, "HRV sync completed: saved ${hrvSamples.size} sample(s) to Room")
             } else {
-                AppLog.i(tagSync, "No HRV history data returned from 0x050A (empty)")
+                AppLog.i(tagSync, "No HRV history data returned from 0x050A; leaving HRV records empty")
             }
 
             delay(200)
@@ -1330,26 +1306,24 @@ class BleRepository(
             // Cancel if disconnected
             if (currentGatt == null || _connectionState.value is ConnectionState.Disconnected) {
                 AppLog.w(tagSync, "Ring disconnected during HRV sync. Aborting remaining sync.")
-                return SyncResult(success = false, steps = stepsCount, message = "Ring disconnected mid-sync", hcStatus = "Disconnected")
+                return SyncResult(success = false, steps = stepsCount, hasSleep = sleepSession != null, sleepMinutes = sleepSession?.durationMinutes ?: 0L, message = "Ring disconnected mid-sync", hcStatus = "Disconnected")
             }
 
             // D) Stress history query (0x050D)
-            _syncProgressMessage.value = "Syncing Stress history (0x050D)..."
-            AppLog.i(tagSync, "D) Requesting Stress history from ring (0x050D)...")
+            _syncProgressMessage.value = "Syncing stress (0x050D)..."
+            AppLog.i(tagSync, "D) Requesting stress history from ring (0x050D)...")
             val stressSamples = bleManager.fetchStressHistory(gatt)
             if (stressSamples.isNotEmpty()) {
                 for (sample in stressSamples) {
-                    healthRepository.saveStress(sample.value, sample.timestamp, isManual = false)
+                    healthRepository.saveStress(stressScore = sample.value, timestamp = sample.timestamp, isManual = false)
                 }
-                val latest = stressSamples.maxByOrNull { it.timestamp }
-                if (latest != null) {
-                    _snapshot.value = _snapshot.value.copy(
-                        latestStress = StressSample(score = latest.value, timestamp = latest.timestamp)
-                    )
+                val latestStressSample = stressSamples.maxByOrNull { it.timestamp }?.let { StressSample(it.value, timestamp = it.timestamp) }
+                if (latestStressSample != null) {
+                    _snapshot.value = _snapshot.value.copy(latestStress = latestStressSample)
                 }
-                AppLog.i(tagSync, "Stress history sync completed: ${stressSamples.size} sample(s) saved to Room")
+                AppLog.i(tagSync, "Stress sync completed: saved ${stressSamples.size} sample(s) to Room")
             } else {
-                AppLog.i(tagSync, "No Stress history data returned from 0x050D (empty)")
+                AppLog.i(tagSync, "No stress history data returned from 0x050D; leaving stress records empty")
             }
 
             delay(200)
@@ -1362,7 +1336,7 @@ class BleRepository(
                 isSimulatedTelemetry = false
             )
 
-            // D) Health Connect verification
+            // F) Health Connect verification
             val hasHcPerms = healthWriter.hasAllPermissions()
             val hcStatus = if (!healthWriter.isHealthConnectAvailable()) {
                 "unavailable"
@@ -1375,7 +1349,9 @@ class BleRepository(
             }
 
             val sleepStr = if (sleepSession != null) "yes" else "no"
-            val resultSummary = "Steps: $stepsCount, Sleep: $sleepStr, HC: $hcStatus"
+            val hrvStr = if (hrvSamples.isNotEmpty()) "${hrvSamples.size} samples" else "none"
+            val stressStr = if (stressSamples.isNotEmpty()) "${stressSamples.size} samples" else "none"
+            val resultSummary = "Steps: $stepsCount, Sleep: $sleepStr, HRV: $hrvStr, Stress: $stressStr, HC: $hcStatus"
             AppLog.i(tagSync, "=== Sequential Sync Finished: $resultSummary ===")
 
             return SyncResult(

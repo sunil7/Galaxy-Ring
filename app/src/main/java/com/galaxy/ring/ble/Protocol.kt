@@ -93,19 +93,16 @@ object Protocol {
     const val KEY_STEPS_PUSH: Int = 0x051A
     const val KEY_SLEEP: Int = 0x0505
     const val KEY_SLEEP_PUSH: Int = 0x0505
-    const val KEY_SMOKING_DETAIL_DATA: Int = 0x051B // Official SDK DHBleCommandEnums.h: smoking data, NOT sleep
-    const val KEY_SCREEN_CONTROL: Int = 0x0285     // Official SDK DHBleCommandEnums.h: BLE_KEY_SCREEN_CONTROL [0x00]=off, [0x01]=on
-
-    // History Read Keys (READ flag 0x10)
     const val KEY_HISTORY_HR: Int = 0x0503
     const val KEY_HISTORY_SPO2: Int = 0x0509
     const val KEY_HISTORY_HRV: Int = 0x050A
     const val KEY_HISTORY_STRESS: Int = 0x050D
-
     const val KEY_HR_HISTORY: Int = KEY_HISTORY_HR
     const val KEY_SPO2_HISTORY: Int = KEY_HISTORY_SPO2
     const val KEY_HRV_HISTORY: Int = KEY_HISTORY_HRV
     const val KEY_STRESS_HISTORY: Int = KEY_HISTORY_STRESS
+    const val KEY_SMOKING_DETAIL_DATA: Int = 0x051B // Official SDK DHBleCommandEnums.h: smoking data, NOT sleep
+    const val KEY_SCREEN_CONTROL: Int = 0x0285     // Official SDK DHBleCommandEnums.h: BLE_KEY_SCREEN_CONTROL [0x00]=off, [0x01]=on
 
     // Measurement Types for Key 0x0609
     const val MEASURE_TYPE_HR: Byte = 0x03.toByte()
@@ -455,8 +452,8 @@ object Protocol {
     }
 
     /**
-     * History read command for keys 0x0503 (HR), 0x0509 (SpO2), 0x050A (HRV), 0x050D (Stress).
-     * Uses encodeFrame with FLAG_COMMAND (0x01) and KEY_FLAG_READ (0x10).
+     * History read command for 0x0503 (HR), 0x0509 (SpO2), 0x050A (HRV), 0x050D (Stress).
+     * Uses encodeFrame with FLAG_COMMAND (0x01) and KEY_FLAG_READ (0x10) with empty data.
      */
     fun buildHistoryRead(key: Int): ByteArray {
         return encodeFrame(
@@ -467,90 +464,50 @@ object Protocol {
         )
     }
 
-    fun buildHistoryReadHr(): ByteArray = buildHistoryRead(KEY_HISTORY_HR)
-    fun buildHistoryReadSpo2(): ByteArray = buildHistoryRead(KEY_HISTORY_SPO2)
-    fun buildHistoryReadHrv(): ByteArray = buildHistoryRead(KEY_HISTORY_HRV)
-    fun buildHistoryReadStress(): ByteArray = buildHistoryRead(KEY_HISTORY_STRESS)
-
-    /**
-     * Real biometric sample parsed from 0x05xx history reply (HR 0x0503, SpO2 0x0509, HRV 0x050A, Stress 0x050D).
-     */
     data class HistorySample(
         val timestamp: Long,
         val value: Int
     )
 
     /**
-     * Parses real samples from a 0x05xx history frame.
-     * Records are ~6 bytes: 4-byte BE timestamp (Y2K seconds since 2000-01-01) + 1-byte value.
-     * Never invents fake samples; returns empty list if payload is empty, zeroed, or holds no valid records.
+     * Parses real samples from history frames (0x0503, 0x0509, 0x050A, 0x050D).
+     * Format: ~6B samples: Y2K timestamp (4B BE seconds since 2000-01-01) + 1B value (+ 1B status/pad).
+     * Returns empty list if payload is empty, all zeroes, or contains no valid samples. Never invents fake samples.
      */
     fun parseHistorySamples(frame: Frame, minVal: Int, maxVal: Int): List<HistorySample> {
-        return parseHistoryData(frame.data, minVal, maxVal)
-    }
-
-    fun parseHistoryData(data: ByteArray, minVal: Int, maxVal: Int): List<HistorySample> {
+        val data = frame.data
         if (data.isEmpty() || data.all { it.toInt() == 0 }) {
             return emptyList()
         }
 
-        val out = mutableListOf<HistorySample>()
+        val samples = mutableListOf<HistorySample>()
+        val stride = if (data.size >= 6 && data.size % 6 == 0) 6 else if (data.size >= 5 && data.size % 5 == 0) 5 else 6
+        val count = data.size / stride
 
-        fun u32BE(offset: Int): Long {
-            if (offset + 4 > data.size) return 0L
-            return ((data[offset].toLong() and 0xFF) shl 24) or
+        for (i in 0 until count) {
+            val offset = i * stride
+            if (offset + 4 >= data.size) break
+            val sec = ((data[offset].toLong() and 0xFF) shl 24) or
                     ((data[offset + 1].toLong() and 0xFF) shl 16) or
                     ((data[offset + 2].toLong() and 0xFF) shl 8) or
                     (data[offset + 3].toLong() and 0xFF)
-        }
 
-        fun toLocalTimestamp(sec: Long): Long {
-            return if (sec in 400_000_000L..1_300_000_000L) {
+            val tsMillis = if (sec in 300_000_000L..2_500_000_000L) {
                 SleepRecordParser.deviceSecondsToLocalMillis(sec)
-            } else if (sec in 1_300_000_000L..2_500_000_000L) {
+            } else if (sec in 1_500_000_000L..2_500_000_000L) {
                 sec * 1000L
             } else {
-                0L
+                continue
+            }
+
+            val value = data[offset + 4].toInt() and 0xFF
+            if (value in minVal..maxVal && value != 0) {
+                samples.add(HistorySample(timestamp = tsMillis, value = value))
             }
         }
-
-        var startOffset = 0
-        val secAt0 = u32BE(0)
-        val tsAt0 = toLocalTimestamp(secAt0)
-        val secAt1 = if (data.size >= 5) u32BE(1) else 0L
-        val tsAt1 = toLocalTimestamp(secAt1)
-
-        if (tsAt0 == 0L && tsAt1 != 0L) {
-            startOffset = 1
-        }
-
-        val remainingLen = data.size - startOffset
-        val stride = if (remainingLen % 6 == 0) {
-            6
-        } else if (remainingLen % 5 == 0) {
-            5
-        } else if (remainingLen >= 6 && toLocalTimestamp(u32BE(startOffset + 6)) != 0L) {
-            6
-        } else if (remainingLen >= 5 && toLocalTimestamp(u32BE(startOffset + 5)) != 0L) {
-            5
-        } else {
-            6
-        }
-
-        var offset = startOffset
-        while (offset + 5 <= data.size) {
-            val sec = u32BE(offset)
-            val ts = toLocalTimestamp(sec)
-            val v = data[offset + 4].toInt() and 0xFF
-
-            if (ts != 0L && v in minVal..maxVal) {
-                out.add(HistorySample(timestamp = ts, value = v))
-            }
-            offset += stride
-        }
-
-        return out
+        return samples
     }
+
 
     /**
      * Parses an incoming buffer of bytes from characteristic 0xB003.

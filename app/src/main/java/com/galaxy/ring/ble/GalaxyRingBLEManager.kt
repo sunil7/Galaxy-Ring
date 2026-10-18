@@ -144,12 +144,6 @@ class GalaxyRingBLEManager(
     private val _sleepFlow = MutableSharedFlow<SleepSession>(extraBufferCapacity = 16)
     val sleepFlow: SharedFlow<SleepSession> = _sleepFlow.asSharedFlow()
 
-    private val _hrvSampleFlow = MutableSharedFlow<Protocol.HistorySample>(extraBufferCapacity = 16)
-    val hrvSampleFlow: SharedFlow<Protocol.HistorySample> = _hrvSampleFlow.asSharedFlow()
-
-    private val _stressSampleFlow = MutableSharedFlow<Protocol.HistorySample>(extraBufferCapacity = 16)
-    val stressSampleFlow: SharedFlow<Protocol.HistorySample> = _stressSampleFlow.asSharedFlow()
-
     /**
      * Resets session telemetry counters when a new device connection is established.
      */
@@ -926,62 +920,6 @@ class GalaxyRingBLEManager(
     }
 
     /**
-     * Sends TX: Protocol.buildHistoryRead(Protocol.KEY_HISTORY_HRV) (0x050A) and parses real HRV samples.
-     * Logs if empty; never invents fake data.
-     */
-    suspend fun fetchHrvHistory(gatt: BluetoothGatt): List<Protocol.HistorySample> {
-        val frame = Protocol.buildHistoryRead(Protocol.KEY_HISTORY_HRV)
-        val txHex = frame.joinToString(" ") { "%02X".format(it) }
-        AppLog.i(tag, "TX -> 0x050A HRV History Query: $txHex")
-        val reply = executeCommand(gatt, frame, Protocol.KEY_HISTORY_HRV, timeoutMs = 4000L)
-        return if (reply != null) {
-            val hex = reply.fullPayload.joinToString(" ") { "%02X".format(it) }
-            AppLog.i(tag, "0x050A HRV history reply received: $hex")
-            val samples = Protocol.parseHistorySamples(reply, minVal = 5, maxVal = 250)
-            if (samples.isEmpty()) {
-                AppLog.i(tag, "0x050A HRV history reply holds no valid samples (empty)")
-            } else {
-                AppLog.i(tag, "Parsed ${samples.size} real HRV sample(s) from 0x050A")
-                for (s in samples) {
-                    _hrvSampleFlow.emit(s)
-                }
-            }
-            samples
-        } else {
-            AppLog.i(tag, "0x050A HRV History Query timed out (0 matching RX)")
-            emptyList()
-        }
-    }
-
-    /**
-     * Sends TX: Protocol.buildHistoryRead(Protocol.KEY_HISTORY_STRESS) (0x050D) and parses real Stress samples.
-     * Logs if empty; never invents fake data.
-     */
-    suspend fun fetchStressHistory(gatt: BluetoothGatt): List<Protocol.HistorySample> {
-        val frame = Protocol.buildHistoryRead(Protocol.KEY_HISTORY_STRESS)
-        val txHex = frame.joinToString(" ") { "%02X".format(it) }
-        AppLog.i(tag, "TX -> 0x050D Stress History Query: $txHex")
-        val reply = executeCommand(gatt, frame, Protocol.KEY_HISTORY_STRESS, timeoutMs = 4000L)
-        return if (reply != null) {
-            val hex = reply.fullPayload.joinToString(" ") { "%02X".format(it) }
-            AppLog.i(tag, "0x050D Stress history reply received: $hex")
-            val samples = Protocol.parseHistorySamples(reply, minVal = 1, maxVal = 100)
-            if (samples.isEmpty()) {
-                AppLog.i(tag, "0x050D Stress history reply holds no valid samples (empty)")
-            } else {
-                AppLog.i(tag, "Parsed ${samples.size} real Stress sample(s) from 0x050D")
-                for (s in samples) {
-                    _stressSampleFlow.emit(s)
-                }
-            }
-            samples
-        } else {
-            AppLog.i(tag, "0x050D Stress History Query timed out (0 matching RX)")
-            emptyList()
-        }
-    }
-
-    /**
      * Result of paged sleep sync containing parsed sessions and working path metadata.
      */
     data class SleepSyncHistoryResult(
@@ -1106,5 +1044,55 @@ class GalaxyRingBLEManager(
     suspend fun syncSleepSequence(gatt: BluetoothGatt): com.galaxy.ring.data.SleepSession? {
         val result = syncSleepHistory(gatt)
         return result.sessions.maxByOrNull { it.endTime }
+    }
+
+    /**
+     * Queries HRV history over BLE using key 0x050A (KEY_HISTORY_HRV, flag 0x10).
+     * Returns parsed real samples (~6B: Y2K timestamp + 1-byte value), or empty list if no data (no fakes).
+     */
+    suspend fun fetchHrvHistory(gatt: BluetoothGatt): List<Protocol.HistorySample> {
+        val frame = Protocol.buildHistoryRead(Protocol.KEY_HISTORY_HRV)
+        val txHex = frame.joinToString(" ") { "%02X".format(it) }
+        AppLog.i(tag, "TX -> 0x050A HRV History Query: $txHex")
+        val reply = executeCommand(gatt, frame, Protocol.KEY_HISTORY_HRV, timeoutMs = 5000L)
+        return if (reply != null) {
+            val rxHex = reply.fullPayload.joinToString(" ") { "%02X".format(it) }
+            AppLog.i(tag, "0x050A HRV History RX: $rxHex")
+            val samples = Protocol.parseHistorySamples(reply, minVal = 5, maxVal = 250)
+            if (samples.isNotEmpty()) {
+                AppLog.i(tag, "Parsed ${samples.size} real HRV history sample(s) from 0x050A")
+            } else {
+                AppLog.i(tag, "0x050A HRV History reply was empty or contained no valid samples: $rxHex")
+            }
+            samples
+        } else {
+            AppLog.i(tag, "0x050A HRV History query timed out (0 matching RX)")
+            emptyList()
+        }
+    }
+
+    /**
+     * Queries Stress history over BLE using key 0x050D (KEY_HISTORY_STRESS, flag 0x10).
+     * Returns parsed real samples (~6B: Y2K timestamp + 1-byte value), or empty list if no data (no fakes).
+     */
+    suspend fun fetchStressHistory(gatt: BluetoothGatt): List<Protocol.HistorySample> {
+        val frame = Protocol.buildHistoryRead(Protocol.KEY_HISTORY_STRESS)
+        val txHex = frame.joinToString(" ") { "%02X".format(it) }
+        AppLog.i(tag, "TX -> 0x050D Stress History Query: $txHex")
+        val reply = executeCommand(gatt, frame, Protocol.KEY_HISTORY_STRESS, timeoutMs = 5000L)
+        return if (reply != null) {
+            val rxHex = reply.fullPayload.joinToString(" ") { "%02X".format(it) }
+            AppLog.i(tag, "0x050D Stress History RX: $rxHex")
+            val samples = Protocol.parseHistorySamples(reply, minVal = 1, maxVal = 100)
+            if (samples.isNotEmpty()) {
+                AppLog.i(tag, "Parsed ${samples.size} real Stress history sample(s) from 0x050D")
+            } else {
+                AppLog.i(tag, "0x050D Stress History reply was empty or contained no valid samples: $rxHex")
+            }
+            samples
+        } else {
+            AppLog.i(tag, "0x050D Stress History query timed out (0 matching RX)")
+            emptyList()
+        }
     }
 }
