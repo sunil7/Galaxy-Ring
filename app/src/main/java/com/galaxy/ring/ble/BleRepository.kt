@@ -213,6 +213,28 @@ class BleRepository(
             }
         }
 
+        // 4b. Observe HRV samples
+        scope.launch {
+            bleManager.hrvSampleFlow.collect { sample ->
+                AppLog.i(tagBle, "HRV sample received from BLEManager: ${sample.value} ms")
+                healthRepository.saveHrv(sample.value, sample.timestamp, isManual = false)
+                _snapshot.value = _snapshot.value.copy(
+                    latestHrv = HrvSample(hrvMs = sample.value, timestamp = sample.timestamp)
+                )
+            }
+        }
+
+        // 4c. Observe Stress samples
+        scope.launch {
+            bleManager.stressSampleFlow.collect { sample ->
+                AppLog.i(tagBle, "Stress sample received from BLEManager: ${sample.value}")
+                healthRepository.saveStress(sample.value, sample.timestamp, isManual = false)
+                _snapshot.value = _snapshot.value.copy(
+                    latestStress = StressSample(score = sample.value, timestamp = sample.timestamp)
+                )
+            }
+        }
+
         // 5. Observe Initialization Sequence Progress
         scope.launch {
             bleManager.initState.collect { state ->
@@ -1278,7 +1300,61 @@ class BleRepository(
 
             delay(200)
 
-            // C) Status check & snapshot update
+            // Cancel if disconnected
+            if (currentGatt == null || _connectionState.value is ConnectionState.Disconnected) {
+                AppLog.w(tagSync, "Ring disconnected during sleep sync. Aborting remaining sync.")
+                return SyncResult(success = false, steps = stepsCount, message = "Ring disconnected mid-sync", hcStatus = "Disconnected")
+            }
+
+            // C) HRV history query (0x050A)
+            _syncProgressMessage.value = "Syncing HRV history (0x050A)..."
+            AppLog.i(tagSync, "C) Requesting HRV history from ring (0x050A)...")
+            val hrvSamples = bleManager.fetchHrvHistory(gatt)
+            if (hrvSamples.isNotEmpty()) {
+                for (sample in hrvSamples) {
+                    healthRepository.saveHrv(sample.value, sample.timestamp, isManual = false)
+                }
+                val latest = hrvSamples.maxByOrNull { it.timestamp }
+                if (latest != null) {
+                    _snapshot.value = _snapshot.value.copy(
+                        latestHrv = HrvSample(hrvMs = latest.value, timestamp = latest.timestamp)
+                    )
+                }
+                AppLog.i(tagSync, "HRV history sync completed: ${hrvSamples.size} sample(s) saved to Room")
+            } else {
+                AppLog.i(tagSync, "No HRV history data returned from 0x050A (empty)")
+            }
+
+            delay(200)
+
+            // Cancel if disconnected
+            if (currentGatt == null || _connectionState.value is ConnectionState.Disconnected) {
+                AppLog.w(tagSync, "Ring disconnected during HRV sync. Aborting remaining sync.")
+                return SyncResult(success = false, steps = stepsCount, message = "Ring disconnected mid-sync", hcStatus = "Disconnected")
+            }
+
+            // D) Stress history query (0x050D)
+            _syncProgressMessage.value = "Syncing Stress history (0x050D)..."
+            AppLog.i(tagSync, "D) Requesting Stress history from ring (0x050D)...")
+            val stressSamples = bleManager.fetchStressHistory(gatt)
+            if (stressSamples.isNotEmpty()) {
+                for (sample in stressSamples) {
+                    healthRepository.saveStress(sample.value, sample.timestamp, isManual = false)
+                }
+                val latest = stressSamples.maxByOrNull { it.timestamp }
+                if (latest != null) {
+                    _snapshot.value = _snapshot.value.copy(
+                        latestStress = StressSample(score = latest.value, timestamp = latest.timestamp)
+                    )
+                }
+                AppLog.i(tagSync, "Stress history sync completed: ${stressSamples.size} sample(s) saved to Room")
+            } else {
+                AppLog.i(tagSync, "No Stress history data returned from 0x050D (empty)")
+            }
+
+            delay(200)
+
+            // E) Status check & snapshot update
             _syncProgressMessage.value = "Updating vitals..."
             val now = System.currentTimeMillis()
             _snapshot.value = _snapshot.value.copy(

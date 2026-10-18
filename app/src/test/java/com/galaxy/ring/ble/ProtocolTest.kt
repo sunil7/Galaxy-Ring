@@ -526,4 +526,81 @@ class ProtocolTest {
             assertTrue(frame.crcOk)
         }
     }
+
+    @Test
+    fun testParseHistorySamplesEmptyAndZero() {
+        val emptyFrame = Protocol.Frame(
+            flag = Protocol.FLAG_ACK,
+            key = Protocol.KEY_HISTORY_HRV,
+            keyFlag = Protocol.KEY_FLAG_READ,
+            data = byteArrayOf(),
+            fullPayload = byteArrayOf(0x05, 0x0A, 0x10),
+            crcOk = true
+        )
+        assertTrue(Protocol.parseHistorySamples(emptyFrame, 5, 250).isEmpty())
+
+        val zeroFrame = Protocol.Frame(
+            flag = Protocol.FLAG_ACK,
+            key = Protocol.KEY_HISTORY_HRV,
+            keyFlag = Protocol.KEY_FLAG_READ,
+            data = byteArrayOf(0x00, 0x00, 0x00, 0x00, 0x00, 0x00),
+            fullPayload = byteArrayOf(0x05, 0x0A, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00),
+            crcOk = true
+        )
+        assertTrue(Protocol.parseHistorySamples(zeroFrame, 5, 250).isEmpty())
+    }
+
+    @Test
+    fun testParseHistorySamplesValidRecords() {
+        // Construct 6-byte record: 4-byte BE timestamp (e.g. deviceSeconds for 2026-10-15 12:00) + value 65 + pad 00
+        val sec = deviceSeconds(2026, 10, 15, 12, 0)
+        val recData = byteArrayOf(
+            (sec shr 24).toByte(), (sec shr 16).toByte(), (sec shr 8).toByte(), sec.toByte(),
+            65.toByte(), 0x00
+        )
+        val frameHrv = Protocol.Frame(
+            flag = Protocol.FLAG_ACK,
+            key = Protocol.KEY_HISTORY_HRV,
+            keyFlag = Protocol.KEY_FLAG_READ,
+            data = recData,
+            fullPayload = byteArrayOf(0x05, 0x0A, 0x10) + recData,
+            crcOk = true
+        )
+        val samplesHrv = Protocol.parseHistorySamples(frameHrv, 5, 250)
+        assertEquals(1, samplesHrv.size)
+        assertEquals(65, samplesHrv[0].value)
+        assertTrue(samplesHrv[0].timestamp > 0L)
+
+        // Stress sample: value 45 in range 1..100
+        val recStress = byteArrayOf(
+            (sec shr 24).toByte(), (sec shr 16).toByte(), (sec shr 8).toByte(), sec.toByte(),
+            45.toByte(), 0x00
+        )
+        val frameStress = Protocol.Frame(
+            flag = Protocol.FLAG_ACK,
+            key = Protocol.KEY_HISTORY_STRESS,
+            keyFlag = Protocol.KEY_FLAG_READ,
+            data = recStress,
+            fullPayload = byteArrayOf(0x05, 0x0D, 0x10) + recStress,
+            crcOk = true
+        )
+        val samplesStress = Protocol.parseHistorySamples(frameStress, 1, 100)
+        assertEquals(1, samplesStress.size)
+        assertEquals(45, samplesStress[0].value)
+
+        // Value 0 out of range (ignored)
+        val recZeroVal = byteArrayOf(
+            (sec shr 24).toByte(), (sec shr 16).toByte(), (sec shr 8).toByte(), sec.toByte(),
+            0.toByte(), 0x00
+        )
+        val frameZeroVal = Protocol.Frame(
+            flag = Protocol.FLAG_ACK,
+            key = Protocol.KEY_HISTORY_HRV,
+            keyFlag = Protocol.KEY_FLAG_READ,
+            data = recZeroVal,
+            fullPayload = byteArrayOf(0x05, 0x0A, 0x10) + recZeroVal,
+            crcOk = true
+        )
+        assertTrue(Protocol.parseHistorySamples(frameZeroVal, 5, 250).isEmpty())
+    }
 }

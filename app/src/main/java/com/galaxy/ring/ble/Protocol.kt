@@ -473,6 +473,86 @@ object Protocol {
     fun buildHistoryReadStress(): ByteArray = buildHistoryRead(KEY_HISTORY_STRESS)
 
     /**
+     * Real biometric sample parsed from 0x05xx history reply (HR 0x0503, SpO2 0x0509, HRV 0x050A, Stress 0x050D).
+     */
+    data class HistorySample(
+        val timestamp: Long,
+        val value: Int
+    )
+
+    /**
+     * Parses real samples from a 0x05xx history frame.
+     * Records are ~6 bytes: 4-byte BE timestamp (Y2K seconds since 2000-01-01) + 1-byte value.
+     * Never invents fake samples; returns empty list if payload is empty, zeroed, or holds no valid records.
+     */
+    fun parseHistorySamples(frame: Frame, minVal: Int, maxVal: Int): List<HistorySample> {
+        return parseHistoryData(frame.data, minVal, maxVal)
+    }
+
+    fun parseHistoryData(data: ByteArray, minVal: Int, maxVal: Int): List<HistorySample> {
+        if (data.isEmpty() || data.all { it.toInt() == 0 }) {
+            return emptyList()
+        }
+
+        val out = mutableListOf<HistorySample>()
+
+        fun u32BE(offset: Int): Long {
+            if (offset + 4 > data.size) return 0L
+            return ((data[offset].toLong() and 0xFF) shl 24) or
+                    ((data[offset + 1].toLong() and 0xFF) shl 16) or
+                    ((data[offset + 2].toLong() and 0xFF) shl 8) or
+                    (data[offset + 3].toLong() and 0xFF)
+        }
+
+        fun toLocalTimestamp(sec: Long): Long {
+            return if (sec in 400_000_000L..1_300_000_000L) {
+                SleepRecordParser.deviceSecondsToLocalMillis(sec)
+            } else if (sec in 1_300_000_000L..2_500_000_000L) {
+                sec * 1000L
+            } else {
+                0L
+            }
+        }
+
+        var startOffset = 0
+        val secAt0 = u32BE(0)
+        val tsAt0 = toLocalTimestamp(secAt0)
+        val secAt1 = if (data.size >= 5) u32BE(1) else 0L
+        val tsAt1 = toLocalTimestamp(secAt1)
+
+        if (tsAt0 == 0L && tsAt1 != 0L) {
+            startOffset = 1
+        }
+
+        val remainingLen = data.size - startOffset
+        val stride = if (remainingLen % 6 == 0) {
+            6
+        } else if (remainingLen % 5 == 0) {
+            5
+        } else if (remainingLen >= 6 && toLocalTimestamp(u32BE(startOffset + 6)) != 0L) {
+            6
+        } else if (remainingLen >= 5 && toLocalTimestamp(u32BE(startOffset + 5)) != 0L) {
+            5
+        } else {
+            6
+        }
+
+        var offset = startOffset
+        while (offset + 5 <= data.size) {
+            val sec = u32BE(offset)
+            val ts = toLocalTimestamp(sec)
+            val v = data[offset + 4].toInt() and 0xFF
+
+            if (ts != 0L && v in minVal..maxVal) {
+                out.add(HistorySample(timestamp = ts, value = v))
+            }
+            offset += stride
+        }
+
+        return out
+    }
+
+    /**
      * Parses an incoming buffer of bytes from characteristic 0xB003.
      * Supports split and coalesced notifications, buffers up to 8 KiB, extracts valid
      * 0xAB frames, and drops corrupt bytes with logging.
