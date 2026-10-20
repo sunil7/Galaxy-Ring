@@ -224,12 +224,36 @@ fun HeartScreen(
             }
         }
 
-        // Stress Day Timeline Card
+        // Stress Day Detail Panel
         item {
-            StressDayTimelineCard(
-                samples = dayStressSamples,
-                selectedCalendar = selectedCalendar
-            )
+            val settings = remember { MonitoringSettings(app) }
+            var stressConfig by remember { mutableStateOf(settings.config(MonitorMetric.STRESS)) }
+            val stressPoints = remember(dayStressSamples) { dayStressSamples.map { it.toMetricPoint() } }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                MetricDetailPanel(
+                    title = "Stress",
+                    unit = "",
+                    points = stressPoints,
+                    modifier = Modifier.padding(16.dp),
+                    monitoringLabel = "Scheduled Stress",
+                    monitoringEnabled = stressConfig.enabled,
+                    intervalMinutes = stressConfig.intervalMin,
+                    onMonitoringEnabledChange = { enabled ->
+                        settings.setEnabled(MonitorMetric.STRESS, enabled)
+                        stressConfig = settings.config(MonitorMetric.STRESS)
+                    },
+                    onIntervalChange = { interval ->
+                        settings.setIntervalMin(MonitorMetric.STRESS, interval)
+                        stressConfig = settings.config(MonitorMetric.STRESS)
+                    },
+                    valueFormat = { it.toInt().toString() }
+                )
+            }
         }
 
         item { Spacer(modifier = Modifier.height(32.dp)) }
