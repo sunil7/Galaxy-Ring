@@ -192,12 +192,36 @@ fun HeartScreen(
             }
         }
 
-        // HRV Day Timeline Card
+        // HRV Day Detail Panel
         item {
-            HrvDayTimelineCard(
-                samples = dayHrvSamples,
-                selectedCalendar = selectedCalendar
-            )
+            val settings = remember { MonitoringSettings(app) }
+            var hrvConfig by remember { mutableStateOf(settings.config(MonitorMetric.HRV)) }
+            val hrvPoints = remember(dayHrvSamples) { dayHrvSamples.map { it.toMetricPoint() } }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                MetricDetailPanel(
+                    title = "HRV",
+                    unit = "ms",
+                    points = hrvPoints,
+                    modifier = Modifier.padding(16.dp),
+                    monitoringLabel = "Regular HRV",
+                    monitoringEnabled = hrvConfig.enabled,
+                    intervalMinutes = hrvConfig.intervalMin,
+                    onMonitoringEnabledChange = { enabled ->
+                        settings.setEnabled(MonitorMetric.HRV, enabled)
+                        hrvConfig = settings.config(MonitorMetric.HRV)
+                    },
+                    onIntervalChange = { interval ->
+                        settings.setIntervalMin(MonitorMetric.HRV, interval)
+                        hrvConfig = settings.config(MonitorMetric.HRV)
+                    },
+                    valueFormat = { it.toInt().toString() }
+                )
+            }
         }
 
         // Stress Day Timeline Card

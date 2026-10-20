@@ -9,7 +9,7 @@
 [x] C2 Sync path: request HRV+Stress history; parse real samples → Room; log if empty (no fakes)
 [x] C3 Heart day UI: MetricDetailPanel + timed HR list for selected day
 [x] C4 SpO2 day UI: same pattern
-[ ] C5 HRV day UI: same pattern
+[x] C5 HRV day UI: same pattern
 [ ] C6 Stress day UI: same pattern
 [ ] D1 Settings: MonitoringSettings toggles/intervals (HR 30m default; SpO2/HRV/Stress 60m)
 [ ] D2 Settings brightness Off|Dim|Soft|Strong; BLE 0x0285 + BrightnessProbe; cache key on RX; no fake success
