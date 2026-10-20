@@ -96,4 +96,12 @@ class MonitoringScheduleTest {
         assertEquals(ScreenBrightness.SOFT, ScreenBrightness.fromLevel(2))
         assertFalse(ScreenBrightness.fromLevel(99) == ScreenBrightness.OFF)
     }
+
+    @Test
+    fun defaultEnabledStatesMatchRwfit() {
+        assertTrue(MonitorMetric.HEART_RATE.defaultEnabled)
+        assertTrue(MonitorMetric.SPO2.defaultEnabled)
+        assertFalse(MonitorMetric.HRV.defaultEnabled)
+        assertFalse(MonitorMetric.STRESS.defaultEnabled)
+    }
 }

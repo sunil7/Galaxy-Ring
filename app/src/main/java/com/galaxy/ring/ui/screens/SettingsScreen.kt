@@ -63,6 +63,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.galaxy.ring.GalaxyRingApp
+import com.galaxy.ring.data.MonitorConfig
+import com.galaxy.ring.data.MonitorMetric
+import com.galaxy.ring.data.MonitoringSchedule
+import com.galaxy.ring.data.MonitoringSettings
+import com.galaxy.ring.data.ScreenBrightness
 import com.galaxy.ring.sync.RingScheduledService
 import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
@@ -96,12 +101,15 @@ fun SettingsScreen(
     var isBondingEnabled by remember { mutableStateOf(repo.isBondingEnabled) }
     var isRingDisplayEnabled by remember { mutableStateOf(repo.isRingDisplayEnabled) }
     var displayStatusMessage by remember { mutableStateOf<String?>(null) }
+    val monitoringSettings = remember { MonitoringSettings(context) }
+    var selectedBrightness by remember { mutableStateOf(monitoringSettings.screenBrightness) }
+    var brightnessStatusMessage by remember { mutableStateOf<String?>(null) }
     var showBatteryPromptDialog by remember { mutableStateOf(false) }
 
-    var isScheduleEnabled by remember { mutableStateOf(repo.isScheduleEnabled) }
-    var selectedInterval by remember { mutableIntStateOf(repo.scheduleIntervalMinutes) }
-    var checkHr by remember { mutableStateOf(repo.scheduleCheckHeartRate) }
-    var checkSpo2 by remember { mutableStateOf(repo.scheduleCheckSpo2) }
+    var hrConfig by remember { mutableStateOf(monitoringSettings.config(MonitorMetric.HEART_RATE)) }
+    var spo2Config by remember { mutableStateOf(monitoringSettings.config(MonitorMetric.SPO2)) }
+    var hrvConfig by remember { mutableStateOf(monitoringSettings.config(MonitorMetric.HRV)) }
+    var stressConfig by remember { mutableStateOf(monitoringSettings.config(MonitorMetric.STRESS)) }
 
     var apneaSnoring by remember { mutableStateOf(repo.apneaLoudSnoring) }
     var apneaSleepiness by remember { mutableStateOf(repo.apneaDaytimeSleepiness) }
@@ -115,6 +123,25 @@ fun SettingsScreen(
     fun checkAndPromptBatteryOptimization() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isIgnoringBatteryOptimizations) {
             showBatteryPromptDialog = true
+        }
+    }
+
+    fun updateMonitoringService() {
+        val anyEnabled = hrConfig.enabled || spo2Config.enabled || hrvConfig.enabled || stressConfig.enabled
+        repo.isScheduleEnabled = anyEnabled
+        repo.scheduleCheckHeartRate = hrConfig.enabled
+        repo.scheduleCheckSpo2 = spo2Config.enabled
+        val shortest = MonitoringSchedule.shortestIntervalMin(monitoringSettings.allConfigs())
+        if (shortest != null) {
+            repo.scheduleIntervalMinutes = shortest
+        }
+        if (anyEnabled) {
+            checkAndPromptBatteryOptimization()
+            RingScheduledService.start(context)
+        } else {
+            if (!isKeepConnected) {
+                RingScheduledService.stop(context)
+            }
         }
     }
 
@@ -303,7 +330,8 @@ fun SettingsScreen(
                                     checkAndPromptBatteryOptimization()
                                     RingScheduledService.start(context)
                                 } else {
-                                    if (!isScheduleEnabled) {
+                                    val anyEnabled = hrConfig.enabled || spo2Config.enabled || hrvConfig.enabled || stressConfig.enabled
+                                    if (!anyEnabled) {
                                         RingScheduledService.stop(context)
                                     }
                                 }
@@ -375,7 +403,7 @@ fun SettingsScreen(
             }
         }
 
-        // 1b. Ring Display & Screen Wake Section
+        // 1b. Screen Brightness Section
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -385,65 +413,74 @@ fun SettingsScreen(
                 Column(modifier = Modifier.padding(20.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(CyberCyan.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(CyberCyan.copy(alpha = 0.2f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Security,
-                                    contentDescription = null,
-                                    tint = CyberCyan,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Ring display",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "When off, the ring screen stays dark and does not light up for gestures/metrics",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Security,
+                                contentDescription = null,
+                                tint = CyberCyan,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
-
-                        Switch(
-                            checked = isRingDisplayEnabled,
-                            onCheckedChange = { enabled ->
-                                isRingDisplayEnabled = enabled
-                                scope.launch {
-                                    val ok = app.bleRepository.setRingDisplay(enabled)
-                                    if (!ok && app.bleRepository.connectionState.value is ConnectionState.Ready) {
-                                        displayStatusMessage = "Display command not confirmed on this firmware — export Admin logs"
-                                    } else {
-                                        displayStatusMessage = null
-                                    }
-                                }
-                            },
-                            modifier = Modifier.testTag("ring_display_toggle"),
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF0F172A), checkedTrackColor = CyberCyan)
-                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Screen brightness",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Current: ${selectedBrightness.label}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
 
-                    if (displayStatusMessage != null) {
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ScreenBrightness.values().forEach { brightness ->
+                            val selected = selectedBrightness == brightness
+                            FilterChip(
+                                selected = selected,
+                                onClick = {
+                                    selectedBrightness = brightness
+                                    monitoringSettings.screenBrightness = brightness
+                                    scope.launch {
+                                        val ok = app.bleRepository.setScreenBrightness(brightness)
+                                        if (!ok && app.bleRepository.connectionState.value is ConnectionState.Ready) {
+                                            brightnessStatusMessage = "No response from ring for brightness command — export Admin logs"
+                                        } else {
+                                            brightnessStatusMessage = null
+                                        }
+                                    }
+                                },
+                                label = { Text(brightness.label, style = MaterialTheme.typography.labelSmall) },
+                                modifier = Modifier.testTag("brightness_chip_${brightness.name.lowercase()}"),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = CyberCyan,
+                                    selectedLabelColor = Color(0xFF0F172A)
+                                )
+                            )
+                        }
+                    }
+
+                    if (brightnessStatusMessage != null) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = displayStatusMessage!!,
+                            text = brightnessStatusMessage!!,
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium,
                             color = RosePulse
@@ -453,7 +490,7 @@ fun SettingsScreen(
             }
         }
 
-        // 2. Scheduled Checks Section
+        // 2. Health Monitoring Section
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -463,189 +500,145 @@ fun SettingsScreen(
                 Column(modifier = Modifier.padding(20.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(CyberCyan.copy(alpha = 0.2f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Schedule,
-                                    contentDescription = null,
-                                    tint = CyberCyan,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Scheduled Checks",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "Automated background biometric logging",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(CyberCyan.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.HealthAndSafety,
+                                contentDescription = null,
+                                tint = CyberCyan,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
-
-                        Switch(
-                            checked = isScheduleEnabled,
-                            onCheckedChange = { enabled ->
-                                isScheduleEnabled = enabled
-                                repo.isScheduleEnabled = enabled
-                                if (enabled) {
-                                    if (!isKeepConnected) {
-                                        isKeepConnected = true
-                                        repo.isKeepConnected = true
-                                    }
-                                    checkAndPromptBatteryOptimization()
-                                    RingScheduledService.start(context)
-                                } else {
-                                    if (!isKeepConnected) {
-                                        RingScheduledService.stop(context)
-                                    }
-                                }
-                            },
-                            modifier = Modifier.testTag("schedule_toggle"),
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF0F172A), checkedTrackColor = CyberCyan)
-                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Health Monitoring",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Automated background biometric logging",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
 
-                    if (isScheduleEnabled) {
-                        Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                        // Interval Picker
-                        Text(
-                            text = "Measurement Interval",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        val intervals = listOf(10, 15, 30, 45, 60)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            intervals.forEach { minutes ->
-                                val selected = selectedInterval == minutes
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = {
-                                        selectedInterval = minutes
-                                        repo.scheduleIntervalMinutes = minutes
-                                        RingScheduledService.restart(context)
-                                    },
-                                    label = { Text("${minutes}m") },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = CyberCyan,
-                                        selectedLabelColor = Color(0xFF0F172A)
-                                    )
-                                )
-                            }
+                    // 1. All-day Heart Rate
+                    HealthMonitoringMetricRow(
+                        metric = MonitorMetric.HEART_RATE,
+                        config = hrConfig,
+                        onEnabledChange = { enabled ->
+                            monitoringSettings.setEnabled(MonitorMetric.HEART_RATE, enabled)
+                            hrConfig = monitoringSettings.config(MonitorMetric.HEART_RATE)
+                            updateMonitoringService()
+                        },
+                        onIntervalChange = { minutes ->
+                            monitoringSettings.setIntervalMin(MonitorMetric.HEART_RATE, minutes)
+                            hrConfig = monitoringSettings.config(MonitorMetric.HEART_RATE)
+                            updateMonitoringService()
                         }
+                    )
 
-                        Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                        // Metrics Selection Checkboxes
-                        Text(
-                            text = "Metrics to measure",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    val next = !checkHr
-                                    checkHr = next
-                                    repo.scheduleCheckHeartRate = next
-                                },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Checkbox(
-                                checked = checkHr,
-                                onCheckedChange = { next ->
-                                    checkHr = next
-                                    repo.scheduleCheckHeartRate = next
-                                },
-                                colors = CheckboxDefaults.colors(checkedColor = CyberCyan)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Heart Rate (Resting / Active PPG)",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                    // 2. Regular Blood oxygen
+                    HealthMonitoringMetricRow(
+                        metric = MonitorMetric.SPO2,
+                        config = spo2Config,
+                        onEnabledChange = { enabled ->
+                            monitoringSettings.setEnabled(MonitorMetric.SPO2, enabled)
+                            spo2Config = monitoringSettings.config(MonitorMetric.SPO2)
+                            updateMonitoringService()
+                        },
+                        onIntervalChange = { minutes ->
+                            monitoringSettings.setIntervalMin(MonitorMetric.SPO2, minutes)
+                            spo2Config = monitoringSettings.config(MonitorMetric.SPO2)
+                            updateMonitoringService()
                         }
+                    )
 
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    val next = !checkSpo2
-                                    checkSpo2 = next
-                                    repo.scheduleCheckSpo2 = next
-                                },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Checkbox(
-                                checked = checkSpo2,
-                                onCheckedChange = { next ->
-                                    checkSpo2 = next
-                                    repo.scheduleCheckSpo2 = next
-                                },
-                                colors = CheckboxDefaults.colors(checkedColor = CyberCyan)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "SpO₂ (Blood Oxygen Saturation)",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 3. Regular HRV
+                    HealthMonitoringMetricRow(
+                        metric = MonitorMetric.HRV,
+                        config = hrvConfig,
+                        onEnabledChange = { enabled ->
+                            monitoringSettings.setEnabled(MonitorMetric.HRV, enabled)
+                            hrvConfig = monitoringSettings.config(MonitorMetric.HRV)
+                            updateMonitoringService()
+                        },
+                        onIntervalChange = { minutes ->
+                            monitoringSettings.setIntervalMin(MonitorMetric.HRV, minutes)
+                            hrvConfig = monitoringSettings.config(MonitorMetric.HRV)
+                            updateMonitoringService()
                         }
+                    )
 
-                        Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                        // Last Run info
-                        Text(
-                            text = "Last Scheduled Run",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        val lastRunTime = if (repo.lastScheduleRunTimestamp > 0) {
-                            SimpleDateFormat("MMM d, HH:mm:ss", Locale.getDefault()).format(Date(repo.lastScheduleRunTimestamp))
-                        } else {
-                            "Never run yet"
+                    // 4. Scheduled Stress
+                    HealthMonitoringMetricRow(
+                        metric = MonitorMetric.STRESS,
+                        config = stressConfig,
+                        onEnabledChange = { enabled ->
+                            monitoringSettings.setEnabled(MonitorMetric.STRESS, enabled)
+                            stressConfig = monitoringSettings.config(MonitorMetric.STRESS)
+                            updateMonitoringService()
+                        },
+                        onIntervalChange = { minutes ->
+                            monitoringSettings.setIntervalMin(MonitorMetric.STRESS, minutes)
+                            stressConfig = monitoringSettings.config(MonitorMetric.STRESS)
+                            updateMonitoringService()
                         }
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)))
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Last Run info
+                    Text(
+                        text = "Last Scheduled Run",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    val lastRunTime = if (repo.lastScheduleRunTimestamp > 0) {
+                        SimpleDateFormat("MMM d, HH:mm:ss", Locale.getDefault()).format(Date(repo.lastScheduleRunTimestamp))
+                    } else {
+                        "Never run yet"
+                    }
+                    Text(
+                        text = "Time: $lastRunTime",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (repo.lastScheduleRunResult != null) {
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Time: $lastRunTime",
+                            text = "Result: ${repo.lastScheduleRunResult}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (repo.lastScheduleRunResult?.contains("Error") == true || repo.lastScheduleRunResult?.contains("skipped") == true) RosePulse else NeonEmerald
                         )
-                        if (repo.lastScheduleRunResult != null) {
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Result: ${repo.lastScheduleRunResult}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (repo.lastScheduleRunResult?.contains("Error") == true || repo.lastScheduleRunResult?.contains("skipped") == true) RosePulse else NeonEmerald
-                            )
-                        }
                     }
                 }
             }
@@ -1106,3 +1099,66 @@ fun SettingsScreen(
         item { Spacer(modifier = Modifier.height(32.dp)) }
     }
 }
+
+@Composable
+private fun HealthMonitoringMetricRow(
+    metric: MonitorMetric,
+    config: MonitorConfig,
+    onEnabledChange: (Boolean) -> Unit,
+    onIntervalChange: (Int) -> Unit
+) {
+    val intervalStr = if (config.intervalMin % 60 == 0) "${config.intervalMin / 60}h" else "${config.intervalMin}m"
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = metric.label,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = if (config.enabled) "Every $intervalStr" else "Disabled",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (config.enabled) CyberCyan else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = config.enabled,
+                onCheckedChange = onEnabledChange,
+                modifier = Modifier.testTag("monitor_${metric.prefKey}_toggle"),
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color(0xFF0F172A),
+                    checkedTrackColor = CyberCyan
+                )
+            )
+        }
+
+        if (config.enabled) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                MonitoringSchedule.INTERVAL_OPTIONS_MIN.forEach { minutes ->
+                    val selected = config.intervalMin == minutes
+                    val label = if (minutes % 60 == 0) "${minutes / 60}h" else "${minutes}m"
+                    FilterChip(
+                        selected = selected,
+                        onClick = { onIntervalChange(minutes) },
+                        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = CyberCyan,
+                            selectedLabelColor = Color(0xFF0F172A)
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+

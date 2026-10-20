@@ -24,7 +24,9 @@ import com.galaxy.ring.data.ConnectionState
 import com.galaxy.ring.data.HeartRateSample
 import com.galaxy.ring.data.HrvSample
 import com.galaxy.ring.data.ManualMeasurementState
+import com.galaxy.ring.data.MonitoringSettings
 import com.galaxy.ring.data.OxygenSaturationSample
+import com.galaxy.ring.data.ScreenBrightness
 import com.galaxy.ring.data.StressSample
 import com.galaxy.ring.data.RingBattery
 import com.galaxy.ring.data.RingDevice
@@ -436,10 +438,11 @@ class BleRepository(
                 _connectionState.value = ConnectionState.Ready(device, rxTotal)
                 AppLog.i(tagBle, "Galaxy Ring marked READY. Total RX frames since connect: $rxTotal")
 
-                // Re-apply ring display setting after each successful init
+                // Re-apply brightness setting after each successful init
                 scope.launch {
                     delay(300)
-                    setRingDisplay(healthRepository.isRingDisplayEnabled)
+                    val settings = MonitoringSettings(context)
+                    setScreenBrightness(settings.screenBrightness)
                 }
 
                 // Automatically trigger sync once after init reaches Ready (debounced 30s)
@@ -1081,23 +1084,42 @@ class BleRepository(
         }
     }
 
-    suspend fun setRingDisplay(enabled: Boolean): Boolean {
-        healthRepository.isRingDisplayEnabled = enabled
+    suspend fun setScreenBrightness(brightness: ScreenBrightness): Boolean {
+        val settings = MonitoringSettings(context)
+        settings.screenBrightness = brightness
         val gatt = currentGatt
         val state = _connectionState.value
         if (gatt == null || state !is ConnectionState.Ready) {
-            AppLog.i(tagBle, "Ring display preference set to $enabled (ring not currently Ready; will apply upon connect)")
+            AppLog.i(tagBle, "Screen brightness preference set to ${brightness.label} (ring not currently Ready; will apply upon connect)")
             return true
         }
-        val (success, confirmedKey) = bleManager.sendDisplayCommand(gatt, enabled, healthRepository.displayCommandKey)
-        if (success && confirmedKey != null) {
-            healthRepository.displayCommandKey = confirmedKey
-            AppLog.i(tagBle, "Ring display set to $enabled (confirmed key=0x${"%04X".format(confirmedKey)})")
-            return true
+        val confirmedCandidate = bleManager.sendBrightnessCommand(
+            gatt,
+            brightness,
+            settings.brightnessKey,
+            settings.brightnessShape
+        )
+        return if (confirmedCandidate != null) {
+            settings.brightnessKey = confirmedCandidate.key
+            settings.brightnessShape = confirmedCandidate.shape
+            healthRepository.isRingDisplayEnabled = (brightness != ScreenBrightness.OFF)
+            AppLog.i(tagBle, "Screen brightness set to ${brightness.label} (confirmed key=0x${"%04X".format(confirmedCandidate.key)}, shape=${confirmedCandidate.shape})")
+            true
         } else {
-            AppLog.w(tagBle, "Display command not confirmed on this firmware — export Admin logs")
-            return false
+            AppLog.w(tagBle, "no RX for any brightness candidate")
+            false
         }
+    }
+
+    suspend fun setRingDisplay(enabled: Boolean): Boolean {
+        healthRepository.isRingDisplayEnabled = enabled
+        val settings = MonitoringSettings(context)
+        val targetBrightness = if (enabled) {
+            if (settings.screenBrightness == ScreenBrightness.OFF) ScreenBrightness.STRONG else settings.screenBrightness
+        } else {
+            ScreenBrightness.OFF
+        }
+        return setScreenBrightness(targetBrightness)
     }
 
     /**

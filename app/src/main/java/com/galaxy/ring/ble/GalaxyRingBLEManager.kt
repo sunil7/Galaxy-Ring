@@ -9,6 +9,7 @@ import android.content.Context
 import android.os.Build
 import com.galaxy.ring.data.HeartRateSample
 import com.galaxy.ring.data.OxygenSaturationSample
+import com.galaxy.ring.data.ScreenBrightness
 import com.galaxy.ring.data.SleepSession
 import com.galaxy.ring.data.StepData
 import com.galaxy.ring.debug.AppLog
@@ -888,6 +889,35 @@ class GalaxyRingBLEManager(
 
         AppLog.w(tag, "Display command probe exhausted: no candidate key confirmed on this firmware.")
         return Pair(false, null)
+    }
+
+    /**
+     * Executes the ordered probe for ring screen brightness (Off | Dim | Soft | Strong):
+     * Tries cachedKey/cachedShape first if present, then probes candidate keys/shapes.
+     * Logs each candidate TX with BrightnessProbe.describe(...)
+     * Stops on first matching RX where BrightnessProbe.isResponseFor(reply, candidate).
+     * If nothing answers, logs "no RX for any brightness candidate".
+     * Returns the confirmed Candidate, or null if no candidate answered.
+     */
+    suspend fun sendBrightnessCommand(
+        gatt: BluetoothGatt,
+        brightness: ScreenBrightness,
+        cachedKey: Int?,
+        cachedShape: Int?
+    ): BrightnessProbe.Candidate? {
+        val candidates = BrightnessProbe.orderedCandidates(cachedKey, cachedShape)
+        for (candidate in candidates) {
+            AppLog.i(tag, BrightnessProbe.describe(candidate, brightness))
+            val cmd = BrightnessProbe.buildCommand(candidate, brightness)
+            val reply = executeCommand(gatt, cmd, candidate.key, timeoutMs = 2500L, maxRetries = 1)
+            if (reply != null && BrightnessProbe.isResponseFor(reply, candidate)) {
+                val hex = reply.fullPayload.joinToString(" ") { "%02X".format(it) }
+                AppLog.i(tag, "Brightness probe RX key=0x${"%04X".format(candidate.key)} shape=${candidate.shape}: $hex")
+                return candidate
+            }
+        }
+        AppLog.w(tag, "no RX for any brightness candidate")
+        return null
     }
 
     // =========================================================================
