@@ -172,11 +172,11 @@ fun HeartScreen(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 MetricDetailPanel(
-                    title = "Blood Oxygen (SpO₂)",
+                    title = "Blood Oxygen",
                     unit = "%",
                     points = spo2Points,
                     modifier = Modifier.padding(16.dp),
-                    monitoringLabel = MonitorMetric.SPO2.label,
+                    monitoringLabel = "Regular Blood oxygen",
                     monitoringEnabled = spo2Config.enabled,
                     intervalMinutes = spo2Config.intervalMin,
                     onMonitoringEnabledChange = { enabled ->

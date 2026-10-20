@@ -91,15 +91,7 @@ object SleepRecordParser {
         val groups = ArrayList<List<RawRecord>>()
         var current = ArrayList<RawRecord>()
         for (r in sorted) {
-            val prev = current.lastOrNull()
-            val shouldSplit = if (prev != null) {
-                val gap = r.tsMillis - prev.tsMillis
-                val prevAwake = stageForCode(prev.code) == SleepStage.AWAKE
-                (prevAwake && gap > NIGHT_GAP_MS) || gap > 12L * 60L * 60L * 1000L
-            } else {
-                false
-            }
-            if (shouldSplit) {
+            if (current.isNotEmpty() && r.tsMillis - current.last().tsMillis > NIGHT_GAP_MS) {
                 groups.add(current)
                 current = ArrayList()
             }

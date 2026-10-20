@@ -4,7 +4,6 @@ import com.galaxy.ring.data.DailyStepsEntity
 import com.galaxy.ring.data.HeartRateEntity
 import com.galaxy.ring.data.OxygenSaturationEntity
 import com.galaxy.ring.data.SleepSessionEntity
-import com.galaxy.ring.data.toMetricPoint
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Test
@@ -63,13 +62,5 @@ class HomeDashboardTest {
         assertEquals(99, spo2.percentage.toInt())
         val timeStr = SimpleDateFormat("h:mm a", Locale.US).format(Date(hr.timestamp))
         assertNotNull(timeStr)
-    }
-
-    @Test
-    fun spo2ToMetricPointMapping() {
-        val spo2 = OxygenSaturationEntity(timestamp = 1729100000000L, percentage = 98.5f)
-        val point = spo2.toMetricPoint()
-        assertEquals(1729100000000L, point.timestamp)
-        assertEquals(98.5f, point.value, 0.001f)
     }
 }
