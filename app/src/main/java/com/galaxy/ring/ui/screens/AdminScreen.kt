@@ -118,9 +118,9 @@ fun AdminScreen(
     }
 
     val connDesc = when (val c = connectionState) {
-        is ConnectionState.Ready -> "Ready (${c.device.name})"
+        is ConnectionState.Ready -> "Ready (${if (c.device.name.contains("SR16", ignoreCase = true)) "Galaxy Ring" else c.device.name})"
         is ConnectionState.Connected -> "Connected"
-        is ConnectionState.Connecting -> "Connecting to ${c.deviceName}"
+        is ConnectionState.Connecting -> "Connecting to ${if (c.deviceName.contains("SR16", ignoreCase = true)) "Galaxy Ring" else c.deviceName}"
         is ConnectionState.Initializing -> "Initializing (${c.currentStep}/${c.totalSteps})"
         is ConnectionState.Syncing -> "Syncing (${c.message})"
         is ConnectionState.Scanning -> "Scanning"

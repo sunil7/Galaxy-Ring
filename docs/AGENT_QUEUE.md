@@ -14,5 +14,5 @@
 [ ] D1 Settings: MonitoringSettings toggles/intervals (HR 30m default; SpO2/HRV/Stress 60m)
 [ ] D2 Settings brightness Off|Dim|Soft|Strong; BLE 0x0285 + BrightnessProbe; cache key on RX; no fake success
 [ ] D3 RingScheduledService: wake shortestIntervalMin; measure settings.dueNow() only; markRun after
-[ ] E1 Remove user-visible "SR16"; move Admin under More
+[x] E1 Remove user-visible "SR16"; move Admin under More
 [ ] E2 Sync docs/WIRING.md checkboxes to match repo

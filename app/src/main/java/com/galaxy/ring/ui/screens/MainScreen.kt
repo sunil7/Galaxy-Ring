@@ -758,7 +758,7 @@ fun ConnectionStatusBanner(
             CyberCyan.copy(alpha = 0.15f),
             CyberCyan,
             Icons.Default.Bluetooth,
-            "Connecting to ${connectionState.deviceName}..."
+            "Connecting to ${if (connectionState.deviceName.contains("SR16", ignoreCase = true)) "Galaxy Ring" else connectionState.deviceName}..."
         )
         is ConnectionState.Connected -> Quadruple(
             NeonEmerald.copy(alpha = 0.15f),
@@ -1608,28 +1608,6 @@ fun GalaxyRingTopBar(
             }
         },
         actions = {
-            Button(
-                onClick = onAdminClick,
-                modifier = Modifier.testTag("topbar_admin_button"),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = CyberCyan),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.BugReport,
-                    contentDescription = "Admin / Debug",
-                    tint = Color(0xFF0F172A),
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = "Admin",
-                    color = Color(0xFF0F172A),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp
-                )
-            }
-            Spacer(modifier = Modifier.width(6.dp))
             val hasBattery = snapshot.battery.timestamp != 0L || snapshot.battery.level > 0
             val batteryText = if (hasBattery) "${snapshot.battery.level}%" else "--%"
             Row(
