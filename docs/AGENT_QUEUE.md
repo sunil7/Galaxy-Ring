@@ -11,8 +11,8 @@
 [x] C4 SpO2 day UI: same pattern
 [x] C5 HRV day UI: same pattern
 [x] C6 Stress day UI: same pattern
-[ ] D1 Settings: MonitoringSettings toggles/intervals (HR 30m default; SpO2/HRV/Stress 60m)
-[ ] D2 Settings brightness Off|Dim|Soft|Strong; BLE 0x0285 + BrightnessProbe; cache key on RX; no fake success
+[x] D1 Settings: MonitoringSettings toggles/intervals (HR 30m default; SpO2/HRV/Stress 60m)
+[x] D2 Settings brightness Off|Dim|Soft|Strong; BLE 0x0285 + BrightnessProbe; cache key on RX; no fake success
 [ ] D3 RingScheduledService: wake shortestIntervalMin; measure settings.dueNow() only; markRun after
 [x] E1 Remove user-visible "SR16"; move Admin under More
 [ ] E2 Sync docs/WIRING.md checkboxes to match repo
