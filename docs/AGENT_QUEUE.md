@@ -8,7 +8,7 @@
 [x] C1 Protocol: constants + buildHistoryRead for 0x0503/0509/050A/050D (encodeFrame + READ 0x10 only)
 [x] C2 Sync path: request HRV+Stress history; parse real samples → Room; log if empty (no fakes)
 [x] C3 Heart day UI: MetricDetailPanel + timed HR list for selected day
-[ ] C4 SpO2 day UI: same pattern
+[x] C4 SpO2 day UI: same pattern
 [ ] C5 HRV day UI: same pattern
 [ ] C6 Stress day UI: same pattern
 [ ] D1 Settings: MonitoringSettings toggles/intervals (HR 30m default; SpO2/HRV/Stress 60m)

@@ -160,13 +160,36 @@ fun HeartScreen(
             }
         }
 
-        // SpO2 Day Timeline Card
+        // SpO2 Day Detail Panel
         item {
-            Spo2DayTimelineCard(
-                samples = daySpo2Samples,
-                scheduleIntervalMinutes = scheduleInterval,
-                selectedCalendar = selectedCalendar
-            )
+            val settings = remember { MonitoringSettings(app) }
+            var spo2Config by remember { mutableStateOf(settings.config(MonitorMetric.SPO2)) }
+            val spo2Points = remember(daySpo2Samples) { daySpo2Samples.map { it.toMetricPoint() } }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                MetricDetailPanel(
+                    title = "Blood Oxygen (SpO₂)",
+                    unit = "%",
+                    points = spo2Points,
+                    modifier = Modifier.padding(16.dp),
+                    monitoringLabel = MonitorMetric.SPO2.label,
+                    monitoringEnabled = spo2Config.enabled,
+                    intervalMinutes = spo2Config.intervalMin,
+                    onMonitoringEnabledChange = { enabled ->
+                        settings.setEnabled(MonitorMetric.SPO2, enabled)
+                        spo2Config = settings.config(MonitorMetric.SPO2)
+                    },
+                    onIntervalChange = { interval ->
+                        settings.setIntervalMin(MonitorMetric.SPO2, interval)
+                        spo2Config = settings.config(MonitorMetric.SPO2)
+                    },
+                    valueFormat = { it.toInt().toString() }
+                )
+            }
         }
 
         // HRV Day Timeline Card
