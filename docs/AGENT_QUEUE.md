@@ -15,4 +15,4 @@
 [x] D2 Settings brightness Off|Dim|Soft|Strong; BLE 0x0285 + BrightnessProbe; cache key on RX; no fake success
 [ ] D3 RingScheduledService: wake shortestIntervalMin; measure settings.dueNow() only; markRun after
 [x] E1 Remove user-visible "SR16"; move Admin under More
-[ ] E2 Sync docs/WIRING.md checkboxes to match repo
+[x] E2 Sync docs/WIRING.md checkboxes to match repo
