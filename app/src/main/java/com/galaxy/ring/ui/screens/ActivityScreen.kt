@@ -28,9 +28,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.galaxy.ring.GalaxyRingApp
+import com.galaxy.ring.data.MonitorMetric
+import com.galaxy.ring.data.MonitoringSettings
+import com.galaxy.ring.data.toMetricPoint
 import com.galaxy.ring.ui.theme.CyberCyan
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -51,6 +55,9 @@ fun ActivityScreen(
     }
 
     val daySteps by repo.getDailySteps(selectedDateStr).collectAsState(initial = null)
+    val daySpo2Samples by repo.getSpo2ForDay(selectedCalendar.time).collectAsState(initial = emptyList())
+    val dayStressSamples by repo.getStressForDay(selectedCalendar.time).collectAsState(initial = emptyList())
+
     val friendlyDateStr = remember(selectedCalendar.timeInMillis) {
         SimpleDateFormat("EEE, MMM d, yyyy", Locale.US).format(selectedCalendar.time)
     }
@@ -127,6 +134,74 @@ fun ActivityScreen(
         // Daily Steps Activity Card
         item {
             HistoryStepsCard(steps = daySteps)
+        }
+
+        // SpO2 Day Detail Panel
+        item {
+            val settings = remember { MonitoringSettings(app) }
+            var spo2Config by remember { mutableStateOf(settings.config(MonitorMetric.SPO2)) }
+            val spo2Points = remember(daySpo2Samples) { daySpo2Samples.map { it.toMetricPoint() } }
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("spo2_detail_card"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                MetricDetailPanel(
+                    title = "Blood Oxygen",
+                    unit = "%",
+                    points = spo2Points,
+                    modifier = Modifier.padding(16.dp),
+                    monitoringLabel = "Regular Blood oxygen",
+                    monitoringEnabled = spo2Config.enabled,
+                    intervalMinutes = spo2Config.intervalMin,
+                    onMonitoringEnabledChange = { enabled ->
+                        settings.setEnabled(MonitorMetric.SPO2, enabled)
+                        spo2Config = settings.config(MonitorMetric.SPO2)
+                    },
+                    onIntervalChange = { interval ->
+                        settings.setIntervalMin(MonitorMetric.SPO2, interval)
+                        spo2Config = settings.config(MonitorMetric.SPO2)
+                    },
+                    valueFormat = { it.toInt().toString() }
+                )
+            }
+        }
+
+        // Stress Day Detail Panel
+        item {
+            val settings = remember { MonitoringSettings(app) }
+            var stressConfig by remember { mutableStateOf(settings.config(MonitorMetric.STRESS)) }
+            val stressPoints = remember(dayStressSamples) { dayStressSamples.map { it.toMetricPoint() } }
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("stress_detail_card"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                MetricDetailPanel(
+                    title = "Stress",
+                    unit = "",
+                    points = stressPoints,
+                    modifier = Modifier.padding(16.dp),
+                    monitoringLabel = "Scheduled Stress",
+                    monitoringEnabled = stressConfig.enabled,
+                    intervalMinutes = stressConfig.intervalMin,
+                    onMonitoringEnabledChange = { enabled ->
+                        settings.setEnabled(MonitorMetric.STRESS, enabled)
+                        stressConfig = settings.config(MonitorMetric.STRESS)
+                    },
+                    onIntervalChange = { interval ->
+                        settings.setIntervalMin(MonitorMetric.STRESS, interval)
+                        stressConfig = settings.config(MonitorMetric.STRESS)
+                    },
+                    valueFormat = { it.toInt().toString() }
+                )
+            }
         }
 
         item { Spacer(modifier = Modifier.height(32.dp)) }

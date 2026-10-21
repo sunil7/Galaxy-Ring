@@ -188,3 +188,24 @@ interface StressDao {
     @Query("DELETE FROM stress_records")
     suspend fun deleteAll()
 }
+
+@Dao
+interface WorkoutDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(entity: WorkoutSessionEntity): Long
+
+    @Query("SELECT * FROM workout_session_records WHERE date = :date ORDER BY startTime DESC")
+    fun getWorkoutsForDate(date: String): Flow<List<WorkoutSessionEntity>>
+
+    @Query("SELECT * FROM workout_session_records WHERE id = :id LIMIT 1")
+    suspend fun getWorkoutById(id: Long): WorkoutSessionEntity?
+
+    @Query("SELECT * FROM workout_session_records ORDER BY startTime DESC")
+    fun getAllWorkouts(): Flow<List<WorkoutSessionEntity>>
+
+    @Query("DELETE FROM workout_session_records WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM workout_session_records")
+    suspend fun deleteAll()
+}

@@ -452,6 +452,11 @@ class GalaxyRingBLEManager(
                     handleSleepFrame(frame)
                 }
 
+                // 1d. Workout history frame (Key 0x0506 - KEY_WORKOUT)
+                if (frame.key == Protocol.KEY_WORKOUT) {
+                    Protocol.parseWorkoutFrame(frame)
+                }
+
                 // 2. Status updates (Key 0x0609 measurement completed: payload ends with type, 0x05, 0x00)
                 if (frame.key == Protocol.KEY_MEASURE_CONTROL) {
                     val completedType = Protocol.getCompletedMeasurementType(frame)

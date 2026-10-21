@@ -111,4 +111,10 @@ class MonitoringSettings(context: Context) {
             if (value != null) prefs.edit().putInt("brightness_shape", value).apply()
             else prefs.edit().remove("brightness_shape").apply()
         }
+
+    // ---- Distance Unit (km vs mi) ----
+
+    var useMiles: Boolean
+        get() = prefs.getBoolean("distance_unit_miles", false)
+        set(value) = prefs.edit().putBoolean("distance_unit_miles", value).apply()
 }

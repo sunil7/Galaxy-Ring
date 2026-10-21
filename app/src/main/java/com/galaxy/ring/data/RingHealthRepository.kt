@@ -20,6 +20,7 @@ class RingHealthRepository(private val context: Context) {
     private val sleepDao = database.sleepDao()
     private val hrvDao = database.hrvDao()
     private val stressDao = database.stressDao()
+    private val workoutDao = database.workoutDao()
 
     private val prefs: SharedPreferences =
         context.getSharedPreferences("galaxy_ring_prefs", Context.MODE_PRIVATE)

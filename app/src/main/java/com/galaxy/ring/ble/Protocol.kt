@@ -94,6 +94,9 @@ object Protocol {
     const val KEY_SLEEP: Int = 0x0505
     const val KEY_SLEEP_PUSH: Int = 0x0505
     const val KEY_HISTORY_HR: Int = 0x0503
+    const val KEY_WORKOUT: Int = 0x0506
+    const val KEY_HISTORY_WORKOUT: Int = KEY_WORKOUT
+    const val KEY_WORKOUT_HISTORY: Int = KEY_WORKOUT
     const val KEY_HISTORY_SPO2: Int = 0x0509
     const val KEY_HISTORY_HRV: Int = 0x050A
     const val KEY_HISTORY_STRESS: Int = 0x050D
@@ -452,7 +455,7 @@ object Protocol {
     }
 
     /**
-     * History read command for 0x0503 (HR), 0x0509 (SpO2), 0x050A (HRV), 0x050D (Stress).
+     * History read command for 0x0503 (HR), 0x0506 (Workout), 0x0509 (SpO2), 0x050A (HRV), 0x050D (Stress).
      * Uses encodeFrame with FLAG_COMMAND (0x01) and KEY_FLAG_READ (0x10) with empty data.
      */
     fun buildHistoryRead(key: Int): ByteArray {
@@ -463,6 +466,11 @@ object Protocol {
             data = byteArrayOf()
         )
     }
+
+    /**
+     * Builds workout history read command (key 0x0506, flag 0x01, keyFlag 0x10).
+     */
+    fun buildWorkoutHistoryRead(): ByteArray = buildHistoryRead(KEY_WORKOUT)
 
     data class HistorySample(
         val timestamp: Long,
@@ -930,5 +938,23 @@ object Protocol {
                 "dur=${session.durationMinutes}m segments=${segments.size} status=$status"
         )
         return session
+    }
+
+    /**
+     * Stub parser for workout history frames (key 0x0506).
+     * Logs raw payload hex via AppLog. Never invents fake sessions.
+     * Full workout data model parsing is implemented in F3.
+     */
+    fun parseWorkoutFrame(frame: Frame): ByteArray? {
+        if (frame.key != KEY_WORKOUT) return null
+        val fullHex = frame.fullPayload.joinToString(" ") { "%02X".format(it) }
+        val dataHex = frame.data.joinToString(" ") { "%02X".format(it) }
+        AppLog.i(
+            "Protocol",
+            "parseWorkoutFrame: key=0x0506, flag=0x${"%02X".format(frame.flag)}, " +
+                "keyFlag=0x${"%02X".format(frame.keyFlag)}, len=${frame.data.size}, " +
+                "dataHex=[$dataHex], fullHex=[$fullHex]"
+        )
+        return if (frame.data.isNotEmpty()) frame.data else null
     }
 }

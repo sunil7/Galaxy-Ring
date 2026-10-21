@@ -499,6 +499,7 @@ class ProtocolTest {
     fun testBuildHistoryReadFrames() {
         val keys = listOf(
             Protocol.KEY_HISTORY_HR,
+            Protocol.KEY_WORKOUT,
             Protocol.KEY_HISTORY_SPO2,
             Protocol.KEY_HISTORY_HRV,
             Protocol.KEY_HISTORY_STRESS
@@ -586,5 +587,46 @@ class ProtocolTest {
         )
         val emptySamples = Protocol.parseHistorySamples(emptyFrame, minVal = 5, maxVal = 250)
         assertTrue(emptySamples.isEmpty())
+    }
+
+    @Test
+    fun testWorkoutProtocolConstantsAndFrameParsing() {
+        assertEquals(0x0506, Protocol.KEY_WORKOUT)
+        assertEquals(0x0506, Protocol.KEY_HISTORY_WORKOUT)
+
+        // Read command uses KEY_FLAG_READ (0x10) and FLAG_COMMAND (0x01)
+        val readBytes = Protocol.buildWorkoutHistoryRead()
+        assertEquals(Protocol.FRAME_HEADER, readBytes[0])
+        val (readFrames, readRem) = Protocol.parseFramesFromStream(readBytes)
+        assertEquals(1, readFrames.size)
+        assertEquals(0, readRem.size)
+        assertEquals(Protocol.KEY_WORKOUT, readFrames[0].key)
+        assertEquals(Protocol.KEY_FLAG_READ, readFrames[0].keyFlag)
+        assertEquals(0, readFrames[0].data.size)
+        assertTrue(readFrames[0].crcOk)
+
+        // Stub parseWorkoutFrame logs raw hex and returns raw data, never inventing fake sessions
+        val samplePayload = byteArrayOf(0x01, 0x02, 0x03, 0x04)
+        val workoutFrame = Protocol.Frame(
+            flag = Protocol.FLAG_PUSH,
+            key = Protocol.KEY_WORKOUT,
+            keyFlag = Protocol.KEY_FLAG_READ,
+            data = samplePayload,
+            fullPayload = byteArrayOf(0x05, 0x06, 0x10) + samplePayload,
+            crcOk = true
+        )
+        val parsed = Protocol.parseWorkoutFrame(workoutFrame)
+        assertArrayEquals(samplePayload, parsed)
+
+        // Non-workout key returns null
+        val otherFrame = Protocol.Frame(
+            flag = Protocol.FLAG_PUSH,
+            key = Protocol.KEY_SLEEP,
+            keyFlag = Protocol.KEY_FLAG_READ,
+            data = samplePayload,
+            fullPayload = byteArrayOf(0x05, 0x05, 0x10) + samplePayload,
+            crcOk = true
+        )
+        assertNull(Protocol.parseWorkoutFrame(otherFrame))
     }
 }

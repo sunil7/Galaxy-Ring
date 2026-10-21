@@ -65,3 +65,25 @@ data class StressEntity(
     val stressScore: Int,
     val recordingMethod: String = "MANUAL" // "MANUAL" or "AUTOMATIC"
 )
+
+@Entity(tableName = "workout_session_records")
+data class WorkoutSessionEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val date: String, // e.g. "2026-10-07"
+    val sportType: Int,
+    val sportTypeName: String,
+    val startTime: Long,
+    val endTime: Long,
+    val durationSeconds: Int,
+    val totalDistanceMeters: Int,
+    val totalSteps: Int,
+    val totalCaloriesKcal: Int,
+    val avgHr: Int? = null,
+    val minHr: Int? = null,
+    val maxHr: Int? = null,
+    val avgCadence: Int? = null,
+    val avgPaceSecondsPerKm: Int? = null,
+    val phasesJson: String = "",
+    val hrPointsJson: String = ""
+)
