@@ -1,7 +1,6 @@
 package com.galaxy.ring.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,7 +14,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -30,7 +28,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.galaxy.ring.GalaxyRingApp
@@ -38,8 +35,6 @@ import com.galaxy.ring.data.MonitorMetric
 import com.galaxy.ring.data.MonitoringSettings
 import com.galaxy.ring.data.toMetricPoint
 import com.galaxy.ring.ui.theme.CyberCyan
-import com.galaxy.ring.ui.theme.HrvTeal
-import com.galaxy.ring.ui.theme.RosePulse
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -55,7 +50,10 @@ fun HeartScreen(
 
     var selectedCalendar by remember { mutableStateOf(Calendar.getInstance()) }
     val dayHrSamples by repo.getHeartRateForDay(selectedCalendar.time).collectAsState(initial = emptyList())
+    val daySpo2Samples by repo.getSpo2ForDay(selectedCalendar.time).collectAsState(initial = emptyList())
     val dayHrvSamples by repo.getHrvForDay(selectedCalendar.time).collectAsState(initial = emptyList())
+    val dayStressSamples by repo.getStressForDay(selectedCalendar.time).collectAsState(initial = emptyList())
+    val scheduleInterval = repo.scheduleIntervalMinutes
 
     val friendlyDateStr = remember(selectedCalendar.timeInMillis) {
         SimpleDateFormat("EEE, MMM d, yyyy", Locale.US).format(selectedCalendar.time)
@@ -130,152 +128,6 @@ fun HeartScreen(
             }
         }
 
-        // Heart Health Overview Card
-        item {
-            val hrValues = remember(dayHrSamples) { dayHrSamples.map { it.bpm }.filter { it > 0 } }
-            val minHr = hrValues.minOrNull()
-            val maxHr = hrValues.maxOrNull()
-            val avgHr = if (hrValues.isNotEmpty()) hrValues.average().toInt() else null
-
-            val hrvValues = remember(dayHrvSamples) { dayHrvSamples.map { it.hrvMs }.filter { it > 0 } }
-            val avgHrv = if (hrvValues.isNotEmpty()) hrvValues.average().toInt() else null
-
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("heart_health_overview_card"),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Heart health",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Icon(
-                            imageVector = Icons.Default.Favorite,
-                            contentDescription = null,
-                            tint = RosePulse,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Based on today's measurements",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Spacer(modifier = Modifier.height(18.dp))
-
-                    if (hrValues.isEmpty() && hrvValues.isEmpty()) {
-                        Text(
-                            text = "No readings",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "MIN",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = minHr?.toString() ?: "--",
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "bpm",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "AVG",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = avgHr?.toString() ?: "--",
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "bpm",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "MAX",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = maxHr?.toString() ?: "--",
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "bpm",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "AVG HRV",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = avgHrv?.toString() ?: "--",
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = HrvTeal
-                                )
-                                Text(
-                                    text = "ms",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         // Heart Rate Day Detail Panel
         item {
             val settings = remember { MonitoringSettings(app) }
@@ -283,9 +135,7 @@ fun HeartScreen(
             val hrPoints = remember(dayHrSamples) { dayHrSamples.map { it.toMetricPoint() } }
 
             Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("heart_rate_detail_card"),
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
@@ -310,6 +160,38 @@ fun HeartScreen(
             }
         }
 
+        // SpO2 Day Detail Panel
+        item {
+            val settings = remember { MonitoringSettings(app) }
+            var spo2Config by remember { mutableStateOf(settings.config(MonitorMetric.SPO2)) }
+            val spo2Points = remember(daySpo2Samples) { daySpo2Samples.map { it.toMetricPoint() } }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                MetricDetailPanel(
+                    title = "Blood Oxygen",
+                    unit = "%",
+                    points = spo2Points,
+                    modifier = Modifier.padding(16.dp),
+                    monitoringLabel = "Regular Blood oxygen",
+                    monitoringEnabled = spo2Config.enabled,
+                    intervalMinutes = spo2Config.intervalMin,
+                    onMonitoringEnabledChange = { enabled ->
+                        settings.setEnabled(MonitorMetric.SPO2, enabled)
+                        spo2Config = settings.config(MonitorMetric.SPO2)
+                    },
+                    onIntervalChange = { interval ->
+                        settings.setIntervalMin(MonitorMetric.SPO2, interval)
+                        spo2Config = settings.config(MonitorMetric.SPO2)
+                    },
+                    valueFormat = { it.toInt().toString() }
+                )
+            }
+        }
+
         // HRV Day Detail Panel
         item {
             val settings = remember { MonitoringSettings(app) }
@@ -317,9 +199,7 @@ fun HeartScreen(
             val hrvPoints = remember(dayHrvSamples) { dayHrvSamples.map { it.toMetricPoint() } }
 
             Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("hrv_detail_card"),
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
@@ -338,6 +218,38 @@ fun HeartScreen(
                     onIntervalChange = { interval ->
                         settings.setIntervalMin(MonitorMetric.HRV, interval)
                         hrvConfig = settings.config(MonitorMetric.HRV)
+                    },
+                    valueFormat = { it.toInt().toString() }
+                )
+            }
+        }
+
+        // Stress Day Detail Panel
+        item {
+            val settings = remember { MonitoringSettings(app) }
+            var stressConfig by remember { mutableStateOf(settings.config(MonitorMetric.STRESS)) }
+            val stressPoints = remember(dayStressSamples) { dayStressSamples.map { it.toMetricPoint() } }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                MetricDetailPanel(
+                    title = "Stress",
+                    unit = "",
+                    points = stressPoints,
+                    modifier = Modifier.padding(16.dp),
+                    monitoringLabel = "Scheduled Stress",
+                    monitoringEnabled = stressConfig.enabled,
+                    intervalMinutes = stressConfig.intervalMin,
+                    onMonitoringEnabledChange = { enabled ->
+                        settings.setEnabled(MonitorMetric.STRESS, enabled)
+                        stressConfig = settings.config(MonitorMetric.STRESS)
+                    },
+                    onIntervalChange = { interval ->
+                        settings.setIntervalMin(MonitorMetric.STRESS, interval)
+                        stressConfig = settings.config(MonitorMetric.STRESS)
                     },
                     valueFormat = { it.toInt().toString() }
                 )
