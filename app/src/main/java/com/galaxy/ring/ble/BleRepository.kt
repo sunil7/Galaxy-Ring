@@ -24,6 +24,7 @@ import com.galaxy.ring.data.ConnectionState
 import com.galaxy.ring.data.HeartRateSample
 import com.galaxy.ring.data.HrvSample
 import com.galaxy.ring.data.ManualMeasurementState
+import com.galaxy.ring.data.MonitorMetric
 import com.galaxy.ring.data.MonitoringSettings
 import com.galaxy.ring.data.OxygenSaturationSample
 import com.galaxy.ring.data.ScreenBrightness
@@ -1123,11 +1124,14 @@ class BleRepository(
     }
 
     /**
-     * Executes scheduled background measurements for enabled metrics (isManual = false).
-     * Saves ONE final sample per metric per scheduled tick.
+     * Executes scheduled background measurements for due metrics (isManual = false).
+     * Saves ONE final sample per metric per scheduled tick, and calls settings.markRun(metric) after each.
      */
-    suspend fun performScheduledMeasurement(checkHr: Boolean, checkSpo2: Boolean): String {
-        AppLog.i(tagSync, "=== Scheduled Biometric Check Starting ===")
+    suspend fun performScheduledMeasurement(
+        dueMetrics: List<MonitorMetric>,
+        settings: MonitoringSettings
+    ): String {
+        AppLog.i(tagSync, "=== Scheduled Biometric Check Starting: ${dueMetrics.map { it.name }} ===")
         val gatt = currentGatt
         val lastAddr = healthRepository.lastConnectedAddress
         if (gatt == null && lastAddr != null) {
@@ -1153,24 +1157,48 @@ class BleRepository(
 
         val results = mutableListOf<String>()
 
-        if (checkHr) {
-            AppLog.i(tagSync, "Scheduled check: measuring Heart Rate (single final sample will be saved)...")
-            val hrSample = executeHeartRateMeasurement(isManual = false)
-            if (hrSample != null) {
-                results.add("HR: ${hrSample.bpm} BPM")
-            } else {
-                results.add("HR: No reading")
-            }
-            delay(2000)
-        }
-
-        if (checkSpo2) {
-            AppLog.i(tagSync, "Scheduled check: measuring SpO2 (single final sample will be saved)...")
-            val spo2Sample = executeOxygenSaturationMeasurement(isManual = false)
-            if (spo2Sample != null) {
-                results.add("SpO₂: ${spo2Sample.percentage.toInt()}%")
-            } else {
-                results.add("SpO₂: No reading")
+        for (metric in dueMetrics) {
+            try {
+                when (metric) {
+                    MonitorMetric.HEART_RATE -> {
+                        AppLog.i(tagSync, "Scheduled check: measuring Heart Rate (single final sample will be saved)...")
+                        val hrSample = executeHeartRateMeasurement(isManual = false)
+                        if (hrSample != null) {
+                            results.add("HR: ${hrSample.bpm} BPM")
+                        } else {
+                            results.add("HR: No reading")
+                        }
+                    }
+                    MonitorMetric.SPO2 -> {
+                        AppLog.i(tagSync, "Scheduled check: measuring SpO2 (single final sample will be saved)...")
+                        val spo2Sample = executeOxygenSaturationMeasurement(isManual = false)
+                        if (spo2Sample != null) {
+                            results.add("SpO₂: ${spo2Sample.percentage.toInt()}%")
+                        } else {
+                            results.add("SpO₂: No reading")
+                        }
+                    }
+                    MonitorMetric.HRV -> {
+                        AppLog.i(tagSync, "Scheduled check: measuring HRV (single final sample will be saved)...")
+                        val hrvSample = executeHrvMeasurement(isManual = false)
+                        if (hrvSample != null) {
+                            results.add("HRV: ${hrvSample.hrvMs} ms")
+                        } else {
+                            results.add("HRV: No reading")
+                        }
+                    }
+                    MonitorMetric.STRESS -> {
+                        AppLog.i(tagSync, "Scheduled check: measuring Stress (single final sample will be saved)...")
+                        val stressSample = executeStressMeasurement(isManual = false)
+                        if (stressSample != null) {
+                            results.add("Stress: ${stressSample.score}/100")
+                        } else {
+                            results.add("Stress: No reading")
+                        }
+                    }
+                }
+            } finally {
+                settings.markRun(metric)
             }
             delay(2000)
         }
@@ -1186,6 +1214,14 @@ class BleRepository(
         healthRepository.lastScheduleRunTimestamp = System.currentTimeMillis()
         healthRepository.lastScheduleRunResult = summary
         return summary
+    }
+
+    suspend fun performScheduledMeasurement(checkHr: Boolean, checkSpo2: Boolean): String {
+        val settings = MonitoringSettings(context)
+        val due = mutableListOf<MonitorMetric>()
+        if (checkHr) due.add(MonitorMetric.HEART_RATE)
+        if (checkSpo2) due.add(MonitorMetric.SPO2)
+        return performScheduledMeasurement(due, settings)
     }
 
     fun resetManualMeasurementState() {

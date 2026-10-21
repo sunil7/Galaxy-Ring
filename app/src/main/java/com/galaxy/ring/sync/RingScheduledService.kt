@@ -18,6 +18,9 @@ import androidx.core.content.ContextCompat
 import com.galaxy.ring.GalaxyRingApp
 import com.galaxy.ring.MainActivity
 import com.galaxy.ring.data.ConnectionState
+import com.galaxy.ring.data.MonitorMetric
+import com.galaxy.ring.data.MonitoringSchedule
+import com.galaxy.ring.data.MonitoringSettings
 import com.galaxy.ring.debug.AppLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,7 +48,11 @@ class RingScheduledService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val app = applicationContext as? GalaxyRingApp
         val repo = app?.healthRepository
-        val shouldRun = (repo?.isKeepConnected == true) || (repo?.isScheduleEnabled == true)
+        val settings = MonitoringSettings(applicationContext)
+        val shortestInterval = MonitoringSchedule.shortestIntervalMin(settings.allConfigs())
+        val isKeep = repo?.isKeepConnected == true
+        val isSchedule = shortestInterval != null || repo?.isScheduleEnabled == true
+        val shouldRun = isKeep || isSchedule
 
         if (!shouldRun) {
             AppLog.i(tag, "RingScheduledService: both schedule and keep-connected are OFF. Stopping service.")
@@ -53,7 +60,12 @@ class RingScheduledService : Service() {
             return START_NOT_STICKY
         }
 
-        AppLog.i(tag, "RingScheduledService starting foreground monitoring (keepConnected=${repo?.isKeepConnected}, schedule=${repo?.isScheduleEnabled})...")
+        if (shortestInterval != null) {
+            repo?.scheduleIntervalMinutes = shortestInterval
+            repo?.isScheduleEnabled = true
+        }
+
+        AppLog.i(tag, "RingScheduledService starting foreground monitoring (keepConnected=$isKeep, shortestInterval=${shortestInterval}m)...")
 
         try {
             val notification = buildPersistentNotification()
@@ -82,12 +94,20 @@ class RingScheduledService : Service() {
             val app = applicationContext as? GalaxyRingApp ?: return@launch
             val repo = app.healthRepository
             val bleRepo = app.bleRepository
+            val settings = MonitoringSettings(applicationContext)
 
-            AppLog.i(tag, "Foreground service monitoring loop started. Schedule=${repo.isScheduleEnabled} (interval=${repo.scheduleIntervalMinutes}m), KeepConnected=${repo.isKeepConnected}")
+            val initialShortest = MonitoringSchedule.shortestIntervalMin(settings.allConfigs())
+            AppLog.i(tag, "Foreground service monitoring loop started. ShortestInterval=${initialShortest}m, KeepConnected=${repo.isKeepConnected}")
 
-            var lastScheduleCheckTime = System.currentTimeMillis()
+            while (isActive) {
+                val currentShortest = MonitoringSchedule.shortestIntervalMin(settings.allConfigs())
+                val isKeep = repo.isKeepConnected
+                if (currentShortest == null && !isKeep) {
+                    AppLog.i(tag, "Monitoring loop exiting: no scheduled metrics and keep-connected is OFF.")
+                    stopSelf()
+                    break
+                }
 
-            while (isActive && (repo.isScheduleEnabled || repo.isKeepConnected)) {
                 // If disconnected and last address known, keep connection alive
                 val connState = bleRepo.connectionState.value
                 if (connState is ConnectionState.Disconnected) {
@@ -98,18 +118,16 @@ class RingScheduledService : Service() {
                     }
                 }
 
-                // If schedule is enabled, check if interval has elapsed
-                if (repo.isScheduleEnabled) {
-                    val intervalMillis = repo.scheduleIntervalMinutes * 60 * 1000L
-                    val now = System.currentTimeMillis()
-                    if (now - lastScheduleCheckTime >= intervalMillis) {
-                        lastScheduleCheckTime = now
-                        AppLog.i(tag, "Scheduled check timer fired! Executing scheduled biometric check...")
+                // If scheduled monitoring has due metrics, measure only settings.dueNow() and markRun after
+                if (currentShortest != null) {
+                    val due = settings.dueNow()
+                    if (due.isNotEmpty()) {
+                        AppLog.i(tag, "Scheduled check timer fired! Due metrics: ${due.map { it.name }}. Executing scheduled measurement...")
                         try {
-                            wakeLock?.acquire(45000L) // 45s safe partial wakelock
+                            wakeLock?.acquire(90000L) // 90s safe partial wakelock
                             bleRepo.performScheduledMeasurement(
-                                checkHr = repo.scheduleCheckHeartRate,
-                                checkSpo2 = repo.scheduleCheckSpo2
+                                dueMetrics = due,
+                                settings = settings
                             )
                         } catch (e: Exception) {
                             AppLog.e(tag, "Error during scheduled biometric check: ${e.message}", e)
@@ -127,7 +145,7 @@ class RingScheduledService : Service() {
                 delay(15000L)
             }
 
-            if (!repo.isScheduleEnabled && !repo.isKeepConnected) {
+            if (MonitoringSchedule.shortestIntervalMin(settings.allConfigs()) == null && !repo.isKeepConnected) {
                 AppLog.i(tag, "Monitoring loop exiting: schedule and keep-connected are both OFF.")
                 stopSelf()
             }
@@ -151,7 +169,9 @@ class RingScheduledService : Service() {
 
     private fun buildPersistentNotification(): Notification {
         val app = applicationContext as? GalaxyRingApp
-        val interval = app?.healthRepository?.scheduleIntervalMinutes ?: 30
+        val settings = MonitoringSettings(applicationContext)
+        val shortest = MonitoringSchedule.shortestIntervalMin(settings.allConfigs())
+        val interval = shortest ?: app?.healthRepository?.scheduleIntervalMinutes ?: 30
 
         val openAppIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -164,10 +184,10 @@ class RingScheduledService : Service() {
         )
 
         val repo = app?.healthRepository
-        val isSchedule = repo?.isScheduleEnabled == true
+        val isSchedule = shortest != null || repo?.isScheduleEnabled == true
         val isKeep = repo?.isKeepConnected == true
         val statusText = when {
-            isSchedule && isKeep -> "Active background monitoring every $interval min (Heart Rate, SpO₂)"
+            isSchedule && isKeep -> "Active background monitoring every $interval min"
             isSchedule -> "Scheduled biometric logging active every $interval min"
             else -> "Ring link maintained in background"
         }
@@ -241,6 +261,32 @@ class RingScheduledService : Service() {
         fun restart(context: Context) {
             stop(context)
             start(context)
+        }
+
+        /**
+         * Returns the shortest interval in minutes among enabled metrics, or null if none are enabled.
+         */
+        fun computeWakeIntervalMin(settings: MonitoringSettings): Int? =
+            MonitoringSchedule.shortestIntervalMin(settings.allConfigs())
+
+        /**
+         * Evaluates due metrics from [settings.dueNow], executes [measureAction] for each,
+         * and calls [settings.markRun] after each measurement.
+         * Returns the list of metrics that were measured.
+         */
+        suspend fun executeDueMeasurements(
+            settings: MonitoringSettings,
+            measureAction: suspend (MonitorMetric) -> Unit
+        ): List<MonitorMetric> {
+            val due = settings.dueNow()
+            for (metric in due) {
+                try {
+                    measureAction(metric)
+                } finally {
+                    settings.markRun(metric)
+                }
+            }
+            return due
         }
     }
 }
