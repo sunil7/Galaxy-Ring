@@ -478,7 +478,62 @@ class RingHealthRepository(private val context: Context) {
     }
 
     /**
-     * Clears all local biometric history records from Room DB.
+     * Saves a list of workout sessions to Room DB.
+     * Never invents synthetic sessions.
+     */
+    suspend fun saveWorkoutSessions(sessions: List<WorkoutSession>) {
+        if (sessions.isEmpty()) return
+        val entities = sessions.map { it.toEntity() }
+        workoutDao.insertAll(entities)
+        AppLog.i(tag, "Saved ${sessions.size} workout session(s) to Room DB")
+    }
+
+    /**
+     * Saves a single workout session to Room DB.
+     */
+    suspend fun saveWorkoutSession(session: WorkoutSession): Long {
+        val entity = session.toEntity()
+        val id = workoutDao.insert(entity)
+        AppLog.i(tag, "Saved workout session: id=$id, type=${session.sportTypeName}, dur=${session.durationSeconds}s")
+        return id
+    }
+
+    /**
+     * Returns workout sessions for a given date string ("yyyy-MM-dd").
+     */
+    fun getWorkoutsForDay(date: String): Flow<List<WorkoutSession>> {
+        return workoutDao.getWorkoutsForDate(date).map { list ->
+            list.map { it.toWorkoutSession() }
+        }
+    }
+
+    /**
+     * Returns workout sessions between two epoch timestamps.
+     */
+    fun getWorkoutsBetween(startTime: Long, endTime: Long): Flow<List<WorkoutSession>> {
+        return workoutDao.getWorkoutsBetween(startTime, endTime).map { list ->
+            list.map { it.toWorkoutSession() }
+        }
+    }
+
+    /**
+     * Returns all workout sessions sorted by newest first.
+     */
+    fun getAllWorkouts(): Flow<List<WorkoutSession>> {
+        return workoutDao.getAllWorkouts().map { list ->
+            list.map { it.toWorkoutSession() }
+        }
+    }
+
+    /**
+     * Returns a specific workout session by id.
+     */
+    fun getWorkoutById(id: Long): Flow<WorkoutSession?> {
+        return workoutDao.getWorkoutById(id).map { it?.toWorkoutSession() }
+    }
+
+    /**
+     * Clears all local biometric and workout history records from Room DB.
      */
     suspend fun clearAllHistory() {
         hrDao.deleteAll()
@@ -487,6 +542,7 @@ class RingHealthRepository(private val context: Context) {
         stressDao.deleteAll()
         stepsDao.deleteAll()
         sleepDao.deleteAll()
-        AppLog.i(tag, "Cleared all local biometric history from Room DB")
+        workoutDao.deleteAll()
+        AppLog.i(tag, "Cleared all local biometric and workout history from Room DB")
     }
 }

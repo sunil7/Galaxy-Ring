@@ -12,6 +12,7 @@ import com.galaxy.ring.data.OxygenSaturationSample
 import com.galaxy.ring.data.ScreenBrightness
 import com.galaxy.ring.data.SleepSession
 import com.galaxy.ring.data.StepData
+import com.galaxy.ring.data.WorkoutSession
 import com.galaxy.ring.debug.AppLog
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -144,6 +145,9 @@ class GalaxyRingBLEManager(
 
     private val _sleepFlow = MutableSharedFlow<SleepSession>(extraBufferCapacity = 16)
     val sleepFlow: SharedFlow<SleepSession> = _sleepFlow.asSharedFlow()
+
+    private val _workoutFlow = MutableSharedFlow<List<WorkoutSession>>(extraBufferCapacity = 16)
+    val workoutFlow: SharedFlow<List<WorkoutSession>> = _workoutFlow.asSharedFlow()
 
     /**
      * Resets session telemetry counters when a new device connection is established.
@@ -452,9 +456,9 @@ class GalaxyRingBLEManager(
                     handleSleepFrame(frame)
                 }
 
-                // 1d. Workout history frame (Key 0x0506 - KEY_WORKOUT)
+                // 1d. Workout / Sport history (Key 0x0506 - KEY_WORKOUT)
                 if (frame.key == Protocol.KEY_WORKOUT) {
-                    Protocol.parseWorkoutFrame(frame)
+                    handleWorkoutFrame(frame)
                 }
 
                 // 2. Status updates (Key 0x0609 measurement completed: payload ends with type, 0x05, 0x00)
@@ -557,6 +561,24 @@ class GalaxyRingBLEManager(
                 }
             } catch (e: Exception) {
                 AppLog.e(tag, "Error handling sleep frame: ${e.message}", e)
+            }
+        }
+    }
+
+    private fun handleWorkoutFrame(frame: Protocol.Frame) {
+        scope.launch {
+            try {
+                val hex = frame.fullPayload.joinToString(" ") { "%02X".format(it) }
+                AppLog.i(tag, "0x0506 Workout RX: $hex")
+                val workouts = Protocol.parseWorkoutFrame(frame)
+                if (workouts.isNotEmpty()) {
+                    AppLog.i(tag, "Workout parsed from 0506: ${workouts.size} session(s)")
+                    _workoutFlow.emit(workouts)
+                } else {
+                    AppLog.i(tag, "0x0506: payload received but no valid workout session parsed")
+                }
+            } catch (e: Exception) {
+                AppLog.e(tag, "Error handling workout frame: ${e.message}", e)
             }
         }
     }
@@ -1127,6 +1149,31 @@ class GalaxyRingBLEManager(
             samples
         } else {
             AppLog.i(tag, "0x050D Stress History query timed out (0 matching RX)")
+            emptyList()
+        }
+    }
+
+    /**
+     * Queries Workout / Sport history over BLE using key 0x0506 (KEY_WORKOUT, flag 0x10 READ).
+     * Returns parsed real sessions via Protocol.parseWorkoutFrame, or empty list if no data (no fakes).
+     */
+    suspend fun fetchWorkoutHistory(gatt: BluetoothGatt): List<WorkoutSession> {
+        val frame = Protocol.buildWorkoutHistoryCommand()
+        val txHex = frame.joinToString(" ") { "%02X".format(it) }
+        AppLog.i(tag, "TX -> 0x0506 Workout History Query: $txHex")
+        val reply = executeCommand(gatt, frame, Protocol.KEY_WORKOUT, timeoutMs = 5000L)
+        return if (reply != null) {
+            val rxHex = reply.fullPayload.joinToString(" ") { "%02X".format(it) }
+            AppLog.i(tag, "0x0506 Workout History RX: $rxHex")
+            val sessions = Protocol.parseWorkoutFrame(reply)
+            if (sessions.isNotEmpty()) {
+                AppLog.i(tag, "Parsed ${sessions.size} real Workout history session(s) from 0x0506")
+            } else {
+                AppLog.i(tag, "0x0506 Workout History reply was empty or contained no valid sessions: $rxHex")
+            }
+            sessions
+        } else {
+            AppLog.i(tag, "0x0506 Workout History query timed out (0 matching RX)")
             emptyList()
         }
     }

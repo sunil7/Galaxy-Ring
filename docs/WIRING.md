@@ -30,21 +30,21 @@ Do NOT rework connect/init/051A steps/0609 HR-SpO2/0505 paging/Sync/keep-alive.
 - [x] Defaults: HR 30 min, SpO2 60, HRV 60, Stress 60.
 
 ## 3. Settings: Health Monitoring + brightness (SettingsScreen.kt)
-- [ ] Health Monitoring section with 4 rows (All-day Heart Rate interval; Regular Blood oxygen, Regular HRV, Scheduled Stress each toggle + interval), driven by `MonitoringSettings`.
-- [ ] "Screen brightness": Off | Dim light | Soft light | Strong light (`ScreenBrightness.values()`), stored in `MonitoringSettings.screenBrightness`.
+- [x] Health Monitoring section with 4 rows (All-day Heart Rate interval; Regular Blood oxygen, Regular HRV, Scheduled Stress each toggle + interval), driven by `MonitoringSettings`.
+- [x] "Screen brightness": Off | Dim light | Soft light | Strong light (`ScreenBrightness.values()`), stored in `MonitoringSettings.screenBrightness`.
 
 ## 4. Brightness over BLE (BleRepository / GalaxyRingBLEManager)
-- [ ] On selection, iterate `BrightnessProbe.orderedCandidates(settings.brightnessKey, settings.brightnessShape)`;
+- [x] On selection, iterate `BrightnessProbe.orderedCandidates(settings.brightnessKey, settings.brightnessShape)`;
   for each candidate AppLog `BrightnessProbe.describe(...)` (TX), send `BrightnessProbe.buildCommand(...)` through the existing write path,
   log any RX, and when a frame with `BrightnessProbe.isResponseFor(frame, candidate)` arrives, cache `brightnessKey` / `brightnessShape` and stop.
-- [ ] If nothing answers, log "no RX for any brightness candidate" (no fake success).
-- [ ] "Off" is also the screen-off value for the optional sleep-mode feature.
+- [x] If nothing answers, log "no RX for any brightness candidate" (no fake success).
+- [x] "Off" is also the screen-off value for the optional sleep-mode feature.
 
 ## 5. Scheduler (RingScheduledService only, no second service)
-- [ ] Wake every `MonitoringSchedule.shortestIntervalMin(settings.allConfigs())` minutes.
-- [ ] On each wake measure only `settings.dueNow()` metrics and call `settings.markRun(metric)` after each.
-- [ ] One Room row per completed manual/scheduled measure (existing +-60 s de-dup stays); Health Connect write when permitted.
-- [ ] HRV/Stress: keep the existing 0609 type probe (`Protocol.HRV_PROBE_TYPES`, `getStressCandidateTypes`) and AppLog every TX/RX key; if the ring never answers, log clearly instead of storing data.
+- [x] Wake every `MonitoringSchedule.shortestIntervalMin(settings.allConfigs())` minutes.
+- [x] On each wake measure only `settings.dueNow()` metrics and call `settings.markRun(metric)` after each.
+- [x] One Room row per completed manual/scheduled measure (existing +-60 s de-dup stays); Health Connect write when permitted.
+- [x] HRV/Stress: keep the existing 0609 type probe (`Protocol.HRV_PROBE_TYPES`, `getStressCandidateTypes`) and AppLog every TX/RX key; if the ring never answers, log clearly instead of storing data.
 
 ## 6. UI strings
 - [x] UI says "Galaxy Ring" only; remove any "SR16" text shown to the user.

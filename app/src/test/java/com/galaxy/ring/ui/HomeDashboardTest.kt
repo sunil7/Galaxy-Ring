@@ -63,4 +63,38 @@ class HomeDashboardTest {
         val timeStr = SimpleDateFormat("h:mm a", Locale.US).format(Date(hr.timestamp))
         assertNotNull(timeStr)
     }
+
+    @Test
+    fun workoutSessionCardFormattingAndEmptyStateString() {
+        val emptyMessage = "No workouts on the ring for this day. Start a sport mode on the ring, then Sync."
+        assertEquals(
+            "No workouts on the ring for this day. Start a sport mode on the ring, then Sync.",
+            emptyMessage
+        )
+
+        val workout = com.galaxy.ring.data.WorkoutSession(
+            id = 1L,
+            date = "2026-10-21",
+            sportType = 2,
+            sportTypeName = "Run",
+            startTime = 1729497600000L, // 08:00 AM
+            endTime = 1729499400000L,   // 08:30 AM
+            durationSeconds = 1800L,
+            totalDistanceMeters = 4500.0,
+            totalSteps = 5200L,
+            totalCaloriesKcal = 320,
+            avgHr = 148
+        )
+
+        assertEquals("Run", workout.sportTypeName)
+        val distStr = String.format(Locale.US, "%.2f km", workout.totalDistanceMeters / 1000.0)
+        assertEquals("4.50 km", distStr)
+
+        val stepsStr = NumberFormat.getIntegerInstance().format(workout.totalSteps) + " steps"
+        assertEquals("5,200 steps", stepsStr)
+
+        val timeFormat = SimpleDateFormat("h:mm a", Locale.US)
+        val rangeStr = "${timeFormat.format(Date(workout.startTime))} – ${timeFormat.format(Date(workout.endTime))}"
+        assertNotNull(rangeStr)
+    }
 }

@@ -216,6 +216,14 @@ class BleRepository(
             }
         }
 
+        // 4b. Observe Workout Sessions
+        scope.launch {
+            bleManager.workoutFlow.collect { workouts ->
+                AppLog.i(tagSync, "Workout sessions received from BLEManager: ${workouts.size} session(s)")
+                healthRepository.saveWorkoutSessions(workouts)
+            }
+        }
+
         // 5. Observe Initialization Sequence Progress
         scope.launch {
             bleManager.initState.collect { state ->
@@ -1386,7 +1394,26 @@ class BleRepository(
 
             delay(200)
 
-            // E) Status check & snapshot update
+            // Cancel if disconnected
+            if (currentGatt == null || _connectionState.value is ConnectionState.Disconnected) {
+                AppLog.w(tagSync, "Ring disconnected during stress sync. Aborting remaining sync.")
+                return SyncResult(success = false, steps = stepsCount, hasSleep = sleepSession != null, sleepMinutes = sleepSession?.durationMinutes ?: 0L, message = "Ring disconnected mid-sync", hcStatus = "Disconnected")
+            }
+
+            // E) Workout history query (0x0506)
+            _syncProgressMessage.value = "Syncing workouts (0x0506)..."
+            AppLog.i(tagSync, "E) Requesting workout history from ring (0x0506)...")
+            val workoutSessions = bleManager.fetchWorkoutHistory(gatt)
+            if (workoutSessions.isNotEmpty()) {
+                healthRepository.saveWorkoutSessions(workoutSessions)
+                AppLog.i(tagSync, "Workout sync completed: saved ${workoutSessions.size} session(s) to Room")
+            } else {
+                AppLog.i(tagSync, "No workout history data returned from 0x0506; leaving workout records unchanged")
+            }
+
+            delay(200)
+
+            // F) Status check & snapshot update
             _syncProgressMessage.value = "Updating vitals..."
             val now = System.currentTimeMillis()
             _snapshot.value = _snapshot.value.copy(
@@ -1394,7 +1421,7 @@ class BleRepository(
                 isSimulatedTelemetry = false
             )
 
-            // F) Health Connect verification
+            // G) Health Connect verification
             val hasHcPerms = healthWriter.hasAllPermissions()
             val hcStatus = if (!healthWriter.isHealthConnectAvailable()) {
                 "unavailable"
@@ -1409,7 +1436,8 @@ class BleRepository(
             val sleepStr = if (sleepSession != null) "yes" else "no"
             val hrvStr = if (hrvSamples.isNotEmpty()) "${hrvSamples.size} samples" else "none"
             val stressStr = if (stressSamples.isNotEmpty()) "${stressSamples.size} samples" else "none"
-            val resultSummary = "Steps: $stepsCount, Sleep: $sleepStr, HRV: $hrvStr, Stress: $stressStr, HC: $hcStatus"
+            val workoutsStr = if (workoutSessions.isNotEmpty()) "${workoutSessions.size} sessions" else "none"
+            val resultSummary = "Steps: $stepsCount, Sleep: $sleepStr, HRV: $hrvStr, Stress: $stressStr, Workouts: $workoutsStr, HC: $hcStatus"
             AppLog.i(tagSync, "=== Sequential Sync Finished: $resultSummary ===")
 
             return SyncResult(
@@ -1417,6 +1445,7 @@ class BleRepository(
                 steps = stepsCount,
                 hasSleep = sleepSession != null,
                 sleepMinutes = sleepSession?.durationMinutes ?: 0L,
+                workoutsCount = workoutSessions.size,
                 healthConnectWritten = hcSuccess,
                 hcStatus = hcStatus,
                 message = resultSummary

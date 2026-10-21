@@ -201,8 +201,55 @@ data class SyncResult(
     val steps: Long = 0L,
     val hasSleep: Boolean = false,
     val sleepMinutes: Long = 0L,
+    val workoutsCount: Int = 0,
     val healthConnectWritten: Boolean = false,
     val hcStatus: String = "",
     val message: String = ""
+)
+
+/**
+ * Heart rate measurement during a sport workout session.
+ */
+data class SportHrPoint(
+    val offsetSeconds: Long,
+    val timestamp: Long,
+    val bpm: Int
+)
+
+/**
+ * Metric phase (e.g. per-kilometer or split interval) during a workout.
+ */
+data class PacePhase(
+    val phaseIndex: Int,
+    val durationSeconds: Long,
+    val paceSeconds: Long,
+    val distanceMeters: Double = 1000.0,
+    val steps: Long = 0L
+)
+
+/**
+ * Workout / Sport session recorded on the ring.
+ * Corresponds to RWFit SportItemBean & SportResultBean.
+ */
+data class WorkoutSession(
+    val id: Long = 0L,
+    val date: String, // "yyyy-MM-dd"
+    val sportType: Int,
+    val sportTypeName: String,
+    val startTime: Long,
+    val endTime: Long,
+    val durationSeconds: Long,
+    val totalDistanceMeters: Double,
+    val totalSteps: Long,
+    val totalCaloriesKcal: Int,
+    val avgHr: Int? = null,
+    val minHr: Int? = null,
+    val maxHr: Int? = null,
+    val avgPaceSecondsPerKm: Double? = null,
+    val avgSpeedKmH: Double? = null,
+    val avgCadenceSpm: Int? = null,
+    val pacePhases: List<PacePhase> = emptyList(),
+    val hrPoints: List<SportHrPoint> = emptyList(),
+    val rawPayloadHex: String = ""
 )
 

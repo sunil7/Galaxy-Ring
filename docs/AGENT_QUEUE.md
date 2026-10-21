@@ -15,11 +15,10 @@
 [x] D2 Settings brightness Off|Dim|Soft|Strong; BLE 0x0285 + BrightnessProbe; cache key on RX; no fake success
 [x] D3 RingScheduledService: wake shortestIntervalMin; measure settings.dueNow() only; markRun after
 [x] E1 Remove user-visible "SR16"; move Admin under More
-[ ] E2 Sync docs/WIRING.md checkboxes to match repo
-[x] F1 HeartScreen: HR+HRV+Heart health only; move SpO2/Stress to ActivityScreen
+[x] E2 Sync docs/WIRING.md checkboxes to match repo
 [x] F2 Protocol: KEY_WORKOUT=0x0506 + buildHistoryRead; stub parseWorkoutFrame logging raw payload hex (no fake sessions)
-[~] F3 Parse workout payloads into data models WorkoutSession / PacePhase / SportHrPoint (map known sportType ints to Walk/Run/Jog/Hike/Other; unknown → "Activity"). Persist Room. If payload layout uncertain, parse what is safe and AppLog rest — no synthetic sessions.
-[ ] F4 Sync: after existing history pulls, request 0x0506 workout history; save sessions; empty → log only
-[ ] F5 ActivityScreen day list: real WorkoutSession cards for selected day (type, time range, distance, steps). Empty: "No workouts on the ring for this day. Start a sport mode on the ring, then Sync." Keep daily steps summary card separate.
+[x] F3 Parse workout payloads into data models WorkoutSession / PacePhase / SportHrPoint (map known sportType ints to Walk/Run/Jog/Hike/Other; unknown → "Activity"). Persist Room. If payload layout uncertain, parse what is safe and AppLog rest — no synthetic sessions.
+[x] F4 Sync: after existing history pulls, request 0x0506 workout history; save sessions; empty → log only
+[x] F5 ActivityScreen day list: real WorkoutSession cards for selected day (type, time range, distance, steps). Empty: "No workouts on the ring for this day. Start a sport mode on the ring, then Sync." Keep daily steps summary card separate.
 [ ] F6 Activity detail screen: summary + phase list (pace/steps/distance) + HR chart + SpO2-in-window chart; km/mi from settings; back to day list
-[x] F7 Move SpO2 + Stress day panels off HeartScreen onto Activity (or More) if still on Heart — Heart = HR + HRV + simple heart summary only
+[ ] F7 Move SpO2 + Stress day panels off HeartScreen onto Activity (or More) if still on Heart — Heart = HR + HRV + simple heart summary only

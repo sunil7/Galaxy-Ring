@@ -194,17 +194,32 @@ interface WorkoutDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entity: WorkoutSessionEntity): Long
 
-    @Query("SELECT * FROM workout_session_records WHERE date = :date ORDER BY startTime DESC")
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(entities: List<WorkoutSessionEntity>)
+
+    @Query("SELECT * FROM workout_session_records WHERE date = :date ORDER BY startTime ASC")
     fun getWorkoutsForDate(date: String): Flow<List<WorkoutSessionEntity>>
 
-    @Query("SELECT * FROM workout_session_records WHERE id = :id LIMIT 1")
-    suspend fun getWorkoutById(id: Long): WorkoutSessionEntity?
+    @Query("SELECT * FROM workout_session_records WHERE startTime >= :startTime AND endTime <= :endTime ORDER BY startTime ASC")
+    fun getWorkoutsBetween(startTime: Long, endTime: Long): Flow<List<WorkoutSessionEntity>>
 
     @Query("SELECT * FROM workout_session_records ORDER BY startTime DESC")
     fun getAllWorkouts(): Flow<List<WorkoutSessionEntity>>
 
+    @Query("SELECT * FROM workout_session_records WHERE id = :id LIMIT 1")
+    fun getWorkoutById(id: Long): Flow<WorkoutSessionEntity?>
+
+    @Query("SELECT * FROM workout_session_records WHERE id = :id LIMIT 1")
+    suspend fun findWorkoutById(id: Long): WorkoutSessionEntity?
+
+    @Query("SELECT * FROM workout_session_records WHERE startTime = :startTime LIMIT 1")
+    suspend fun findWorkoutByStartTime(startTime: Long): WorkoutSessionEntity?
+
     @Query("DELETE FROM workout_session_records WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM workout_session_records WHERE date = :date")
+    suspend fun deleteForDate(date: String)
 
     @Query("DELETE FROM workout_session_records")
     suspend fun deleteAll()

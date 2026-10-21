@@ -14,6 +14,8 @@ import com.galaxy.ring.data.SleepSession
 import com.galaxy.ring.data.SleepStage
 import com.galaxy.ring.data.SleepStageRecord
 import com.galaxy.ring.data.StepData
+import com.galaxy.ring.data.WorkoutRecordParser
+import com.galaxy.ring.data.WorkoutSession
 import com.galaxy.ring.data.isCompleted
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -94,12 +96,12 @@ object Protocol {
     const val KEY_SLEEP: Int = 0x0505
     const val KEY_SLEEP_PUSH: Int = 0x0505
     const val KEY_HISTORY_HR: Int = 0x0503
-    const val KEY_WORKOUT: Int = 0x0506
-    const val KEY_HISTORY_WORKOUT: Int = KEY_WORKOUT
-    const val KEY_WORKOUT_HISTORY: Int = KEY_WORKOUT
     const val KEY_HISTORY_SPO2: Int = 0x0509
     const val KEY_HISTORY_HRV: Int = 0x050A
     const val KEY_HISTORY_STRESS: Int = 0x050D
+    const val KEY_WORKOUT: Int = 0x0506
+    const val KEY_HISTORY_WORKOUT: Int = KEY_WORKOUT
+    const val KEY_WORKOUT_HISTORY: Int = KEY_WORKOUT
     const val KEY_HR_HISTORY: Int = KEY_HISTORY_HR
     const val KEY_SPO2_HISTORY: Int = KEY_HISTORY_SPO2
     const val KEY_HRV_HISTORY: Int = KEY_HISTORY_HRV
@@ -455,7 +457,7 @@ object Protocol {
     }
 
     /**
-     * History read command for 0x0503 (HR), 0x0506 (Workout), 0x0509 (SpO2), 0x050A (HRV), 0x050D (Stress).
+     * History read command for 0x0503 (HR), 0x0509 (SpO2), 0x050A (HRV), 0x050D (Stress), 0x0506 (Workout).
      * Uses encodeFrame with FLAG_COMMAND (0x01) and KEY_FLAG_READ (0x10) with empty data.
      */
     fun buildHistoryRead(key: Int): ByteArray {
@@ -468,9 +470,10 @@ object Protocol {
     }
 
     /**
-     * Builds workout history read command (key 0x0506, flag 0x01, keyFlag 0x10).
+     * Workout history read command (Key 0x0506, KeyFlag 0x10 READ, empty data).
+     * Expected format: AB 01 00 03 [crc16] 05 06 10
      */
-    fun buildWorkoutHistoryRead(): ByteArray = buildHistoryRead(KEY_WORKOUT)
+    fun buildWorkoutHistoryCommand(): ByteArray = buildHistoryRead(KEY_WORKOUT)
 
     data class HistorySample(
         val timestamp: Long,
@@ -941,20 +944,31 @@ object Protocol {
     }
 
     /**
-     * Stub parser for workout history frames (key 0x0506).
-     * Logs raw payload hex via AppLog. Never invents fake sessions.
-     * Full workout data model parsing is implemented in F3.
+     * Parses workout history frames (Key 0x0506, KEY_WORKOUT).
+     * Format uses the same AB frame stack as sleep/HR history (READ 0x10).
+     * Parses real workout sessions into WorkoutSession models.
+     * Never invents synthetic sessions.
      */
-    fun parseWorkoutFrame(frame: Frame): ByteArray? {
-        if (frame.key != KEY_WORKOUT) return null
+    fun parseWorkoutFrame(frame: Frame): List<WorkoutSession> {
+        if (frame.key != KEY_WORKOUT) return emptyList()
         val fullHex = frame.fullPayload.joinToString(" ") { "%02X".format(it) }
-        val dataHex = frame.data.joinToString(" ") { "%02X".format(it) }
+        val data = frame.data
+        val dataHex = if (data.isNotEmpty()) data.joinToString(" ") { "%02X".format(it) } else "<empty>"
         AppLog.i(
             "Protocol",
-            "parseWorkoutFrame: key=0x0506, flag=0x${"%02X".format(frame.flag)}, " +
-                "keyFlag=0x${"%02X".format(frame.keyFlag)}, len=${frame.data.size}, " +
-                "dataHex=[$dataHex], fullHex=[$fullHex]"
+            "parseWorkoutFrame: key=0x0506, flag=0x${"%02X".format(frame.flag)}, keyFlag=0x${"%02X".format(frame.keyFlag)}, " +
+                "data bytes=${data.size}, fullPayload hex: $fullHex, data hex: $dataHex"
         )
-        return if (frame.data.isNotEmpty()) frame.data else null
+        if (data.isEmpty() || data.all { it.toInt() == 0 }) {
+            AppLog.i("Protocol", "parseWorkoutFrame: payload empty or all zeroes; leaving workout records empty")
+            return emptyList()
+        }
+        val sessions = WorkoutRecordParser.parseRecords(data, fullHex)
+        if (sessions.isEmpty()) {
+            AppLog.i("Protocol", "parseWorkoutFrame: no valid workout sessions extracted from payload")
+        } else {
+            AppLog.i("Protocol", "parseWorkoutFrame: extracted ${sessions.size} workout session(s)")
+        }
+        return sessions
     }
 }
