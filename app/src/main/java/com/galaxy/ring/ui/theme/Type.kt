@@ -6,73 +6,59 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-/**
- * Full Material 3 Typography Scale for Galaxy Ring companion.
- *
- * Utilizes the default system font family (Roboto / Roboto Flex / System Sans)
- * without adding external font files or assets, ensuring zero overhead, fast cold-start,
- * and predictable edge-to-edge layout rendering.
- */
+// Typography optimized for dark, sparse health dashboard:
+// large high-contrast numbers with short readable labels
 val Typography = Typography(
-    // Display styles: Reserved for prominent biometric numbers and high-impact hero metrics
     displayLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
-        fontSize = 57.sp,
-        lineHeight = 64.sp,
-        letterSpacing = (-0.25).sp
+        fontSize = 44.sp,
+        lineHeight = 52.sp,
+        letterSpacing = (-0.5).sp
     ),
     displayMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
-        fontSize = 45.sp,
-        lineHeight = 52.sp,
-        letterSpacing = 0.sp
+        fontSize = 36.sp,
+        lineHeight = 44.sp,
+        letterSpacing = (-0.25).sp
     ),
     displaySmall = TextStyle(
         fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 36.sp,
-        lineHeight = 44.sp,
+        fontWeight = FontWeight.Bold,
+        fontSize = 30.sp,
+        lineHeight = 36.sp,
         letterSpacing = 0.sp
     ),
-
-    // Headline styles: Screen titles, primary sections, and prominent dialog titles
     headlineLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 32.sp,
-        lineHeight = 40.sp,
-        letterSpacing = 0.sp
+        fontSize = 26.sp,
+        lineHeight = 32.sp
     ),
     headlineMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 28.sp,
-        lineHeight = 36.sp,
-        letterSpacing = 0.sp
+        fontSize = 22.sp,
+        lineHeight = 28.sp
     ),
     headlineSmall = TextStyle(
         fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 24.sp,
-        lineHeight = 32.sp,
-        letterSpacing = 0.sp
+        fontWeight = FontWeight.Medium,
+        fontSize = 20.sp,
+        lineHeight = 26.sp
     ),
-
-    // Title styles: Card headers, list section headers, and metric card titles
     titleLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.sp
+        fontSize = 18.sp,
+        lineHeight = 24.sp
     ),
     titleMedium = TextStyle(
         fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.SemiBold,
         fontSize = 16.sp,
-        lineHeight = 24.sp,
+        lineHeight = 22.sp,
         letterSpacing = 0.15.sp
     ),
     titleSmall = TextStyle(
@@ -82,14 +68,12 @@ val Typography = Typography(
         lineHeight = 20.sp,
         letterSpacing = 0.1.sp
     ),
-
-    // Body styles: Long-form descriptions, rationale copy, and general text
     bodyLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
-        letterSpacing = 0.5.sp
+        fontSize = 15.sp,
+        lineHeight = 22.sp,
+        letterSpacing = 0.25.sp
     ),
     bodyMedium = TextStyle(
         fontFamily = FontFamily.Default,
@@ -105,14 +89,12 @@ val Typography = Typography(
         lineHeight = 16.sp,
         letterSpacing = 0.4.sp
     ),
-
-    // Label styles: Buttons, navigation items, status pills, timestamps, and metric units
     labelLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Medium,
-        fontSize = 14.sp,
-        lineHeight = 20.sp,
-        letterSpacing = 0.1.sp
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+        letterSpacing = 0.2.sp
     ),
     labelMedium = TextStyle(
         fontFamily = FontFamily.Default,
@@ -125,7 +107,7 @@ val Typography = Typography(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Medium,
         fontSize = 11.sp,
-        lineHeight = 16.sp,
+        lineHeight = 14.sp,
         letterSpacing = 0.5.sp
     )
 )

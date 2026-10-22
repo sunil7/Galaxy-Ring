@@ -56,6 +56,7 @@ object WorkoutRecordParser {
             val pace = f[2].toLongOrNull() ?: return@mapNotNull null
             val dist = f[3].toDoubleOrNull() ?: return@mapNotNull null
             val steps = f[4].toLongOrNull() ?: return@mapNotNull null
+            if (dist <= 0.0 || steps <= 0L) return@mapNotNull null
             PacePhase(idx, dur, pace, dist, steps)
         }
     }
@@ -225,34 +226,36 @@ object WorkoutRecordParser {
             val hrAvg = data[currentIdx].toInt() and 0xFF
             val hrMin = data[currentIdx + 1].toInt() and 0xFF
             val hrMax = data[currentIdx + 2].toInt() and 0xFF
-            if (hrAvg in 30..220) avgHr = hrAvg
-            if (hrMin in 30..220) minHr = hrMin
-            if (hrMax in 30..220) maxHr = hrMax
-            currentIdx += 3
-        }
+            if (hrAvg in 30..220 && hrMin in 30..220 && hrMax in 30..220) {
+                avgHr = hrAvg
+                minHr = hrMin
+                maxHr = hrMax
+                currentIdx += 3
 
-        if (currentIdx + 2 <= data.size) {
-            val pace = u16BE(data, currentIdx)
-            if (pace in 60L..3600L) {
-                avgPaceSecondsPerKm = pace.toDouble()
-                currentIdx += 2
-            }
-        }
+                if (currentIdx + 2 <= data.size) {
+                    val pace = u16BE(data, currentIdx)
+                    if (pace in 60L..3600L) {
+                        avgPaceSecondsPerKm = pace.toDouble()
+                        currentIdx += 2
+                    }
+                }
 
-        if (currentIdx + 2 <= data.size) {
-            val speedRaw = u16BE(data, currentIdx)
-            // Stored either in 0.01 km/h or direct km/h
-            if (speedRaw in 1L..10000L) {
-                avgSpeedKmH = if (speedRaw > 100) speedRaw / 100.0 else speedRaw.toDouble()
-                currentIdx += 2
-            }
-        }
+                if (currentIdx + 2 <= data.size) {
+                    val speedRaw = u16BE(data, currentIdx)
+                    // Stored either in 0.01 km/h or direct km/h
+                    if (speedRaw in 1L..10000L) {
+                        avgSpeedKmH = if (speedRaw > 100) speedRaw / 100.0 else speedRaw.toDouble()
+                        currentIdx += 2
+                    }
+                }
 
-        if (currentIdx + 2 <= data.size) {
-            val cad = u16BE(data, currentIdx).toInt()
-            if (cad in 20..300) {
-                avgCadenceSpm = cad
-                currentIdx += 2
+                if (currentIdx + 2 <= data.size) {
+                    val cad = u16BE(data, currentIdx).toInt()
+                    if (cad in 20..300) {
+                        avgCadenceSpm = cad
+                        currentIdx += 2
+                    }
+                }
             }
         }
 
@@ -262,16 +265,22 @@ object WorkoutRecordParser {
             val count = data[currentIdx].toInt() and 0xFF
             if (count in 1..50 && currentIdx + 1 + count * 2 <= data.size) {
                 currentIdx += 1
+                val phaseDist = if (distMeters > 0.0) distMeters / count else 0.0
+                val phaseSteps = if (totalSteps > 0L) totalSteps / count else 0L
                 for (i in 0 until count) {
                     val paceVal = u16BE(data, currentIdx)
-                    pacePhases.add(
-                        PacePhase(
-                            phaseIndex = i + 1,
-                            durationSeconds = paceVal,
-                            paceSeconds = paceVal,
-                            distanceMeters = 1000.0
+                    // Omit split phase when its distance or steps are unknown. No fabricated default.
+                    if (phaseDist > 0.0 && phaseSteps > 0L) {
+                        pacePhases.add(
+                            PacePhase(
+                                phaseIndex = i + 1,
+                                durationSeconds = paceVal,
+                                paceSeconds = paceVal,
+                                distanceMeters = phaseDist,
+                                steps = phaseSteps
+                            )
                         )
-                    )
+                    }
                     currentIdx += 2
                 }
             }

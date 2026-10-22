@@ -66,8 +66,6 @@ import com.galaxy.ring.data.PacePhase
 import com.galaxy.ring.data.SleepRecordParser
 import com.galaxy.ring.data.WorkoutFormatter
 import com.galaxy.ring.data.WorkoutSession
-import com.galaxy.ring.ui.components.EmptyState
-import com.galaxy.ring.ui.components.SectionHeader
 import com.galaxy.ring.ui.theme.ActivityGreen
 import com.galaxy.ring.ui.theme.AmberGlow
 import com.galaxy.ring.ui.theme.CyberCyan
@@ -77,10 +75,7 @@ import com.galaxy.ring.ui.theme.DarkSurfaceVariant
 import com.galaxy.ring.ui.theme.ElectricViolet
 import com.galaxy.ring.ui.theme.HrvTeal
 import com.galaxy.ring.ui.theme.RosePulse
-import com.galaxy.ring.ui.theme.ShapeLarge
-import com.galaxy.ring.ui.theme.ShapeMedium
-import com.galaxy.ring.ui.theme.ShapeSmall
-import com.galaxy.ring.ui.theme.Spacing
+import com.galaxy.ring.ui.theme.SectionHeader
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -554,22 +549,38 @@ fun WorkoutPhaseListCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         if (phases.isEmpty()) {
-            EmptyState(
-                message = "No split phases recorded for this session.",
-                icon = Icons.Outlined.Info,
-                modifier = Modifier.padding(Spacing.md)
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.size(28.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "No split phases recorded for this session.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
         } else {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(Spacing.md)
+                    .padding(16.dp)
             ) {
                 // Table Header
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = Spacing.xs),
+                        .padding(bottom = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
@@ -604,9 +615,9 @@ fun WorkoutPhaseListCard(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(Spacing.xs))
+                            .clip(RoundedCornerShape(8.dp))
                             .background(if (isEven) DarkSurfaceVariant.copy(alpha = 0.3f) else Color.Transparent)
-                            .padding(horizontal = Spacing.xs, vertical = Spacing.xs + 2.dp),
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -628,22 +639,20 @@ fun WorkoutPhaseListCard(
                             modifier = Modifier.weight(1f)
                         )
 
-                        // Distance: show only when present, omit rather than showing 0 or 1000 m
-                        val hasDistance = phase.distanceMeters > 0.0 && phase.distanceMeters != 1000.0
+                        // Distance
                         Text(
-                            text = if (hasDistance) WorkoutFormatter.formatDistance(phase.distanceMeters, useMiles) else "—",
+                            text = WorkoutFormatter.formatDistance(phase.distanceMeters, useMiles),
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (hasDistance) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f)
                         )
 
-                        // Steps: show only when present (> 0)
-                        val hasSteps = phase.steps > 0
+                        // Steps
                         Text(
-                            text = if (hasSteps) "${phase.steps}" else "—",
+                            text = "${phase.steps}",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium,
-                            color = if (hasSteps) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),
                             textAlign = TextAlign.End
                         )
@@ -814,22 +823,32 @@ fun WorkoutSpo2ChartCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         if (points.isEmpty()) {
-            EmptyState(
-                message = "No blood oxygen readings recorded during this workout window.",
-                icon = Icons.Outlined.Air,
-                modifier = Modifier.padding(Spacing.md)
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Air,
+                    contentDescription = null,
+                    tint = CyberCyan.copy(alpha = 0.6f),
+                    modifier = Modifier.size(28.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "No blood oxygen readings recorded during this workout window.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
         } else {
             val stats = MetricStats.compute(points)
             val startTime = points.first().timestamp.coerceAtMost(session.startTime)
             val endTime = points.last().timestamp.coerceAtLeast(session.endTime)
             val timeSpan = (endTime - startTime).coerceAtLeast(60_000L)
-
-            // Dynamic range with padding (ensures readings including < 90%, e.g. 84%, stay visible)
-            val rawMin = stats?.min ?: points.minOf { it.value }
-            val rawMax = stats?.max ?: points.maxOf { it.value }
-            val minVal = (rawMin - 3f).coerceAtMost(88f).coerceAtLeast(60f)
-            val maxVal = (rawMax + 2f).coerceAtLeast(100f)
 
             Column(
                 modifier = Modifier
@@ -841,7 +860,7 @@ fun WorkoutSpo2ChartCard(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        ChartStatCell("MIN SpO2", "${stats.min.toInt()}%", if (stats.min < 90f) RosePulse else CyberCyan)
+                        ChartStatCell("MIN SpO2", "${stats.min.toInt()}%", CyberCyan)
                         ChartStatCell("AVG SpO2", "${stats.avg.toInt()}%", CyberCyan)
                         ChartStatCell("MAX SpO2", "${stats.max.toInt()}%", CyberCyan)
                     }
@@ -851,6 +870,8 @@ fun WorkoutSpo2ChartCard(
                 // Canvas line chart
                 val lineColor = CyberCyan
                 val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                val minVal = 90f
+                val maxVal = 100f
 
                 Canvas(
                     modifier = Modifier
@@ -877,17 +898,7 @@ fun WorkoutSpo2ChartCard(
                     drawPath(path, lineColor, style = Stroke(width = 3f))
 
                     for (p in points) {
-                        val isBelowThreshold = p.value < 90f
-                        val center = Offset(xOf(p.timestamp), yOf(p.value))
-                        if (isBelowThreshold) {
-                            // "Below range" marker: outer attention halo ensuring < 90% readings stay prominent
-                            drawCircle(RosePulse.copy(alpha = 0.35f), radius = 8f, center = center)
-                            drawCircle(DarkSurface, radius = 5f, center = center)
-                            drawCircle(RosePulse, radius = 3.5f, center = center)
-                        } else {
-                            drawCircle(DarkSurface, radius = 5f, center = center)
-                            drawCircle(lineColor, radius = 3.5f, center = center)
-                        }
+                        drawCircle(lineColor, radius = 4f, center = Offset(xOf(p.timestamp), yOf(p.value)))
                     }
                 }
 
@@ -902,24 +913,6 @@ fun WorkoutSpo2ChartCard(
                     Text(timeFmt.format(Date(startTime)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(timeFmt.format(Date(startTime + timeSpan / 2)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(timeFmt.format(Date(endTime)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-
-                if (points.any { it.value < 90f }) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(RosePulse)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Readings below 90% highlighted",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = RosePulse
-                        )
-                    }
                 }
 
                 // Readings list
@@ -946,7 +939,7 @@ fun WorkoutSpo2ChartCard(
                             text = "${pt.value.toInt()}%",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold,
-                            color = if (pt.value < 90f) RosePulse else CyberCyan
+                            color = CyberCyan
                         )
                     }
                 }

@@ -93,6 +93,7 @@ import com.galaxy.ring.data.SleepStageRecord
 import com.galaxy.ring.data.toSegments
 import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
+import com.galaxy.ring.ui.theme.EmptyState
 import com.galaxy.ring.ui.theme.NeonEmerald
 import com.galaxy.ring.ui.theme.RosePulse
 import kotlinx.coroutines.launch
@@ -620,12 +621,12 @@ fun RicherSleepMetricsGrid(analysis: com.galaxy.ring.data.SleepAnalysis) {
                             color = if (stdDev < 30) NeonEmerald else Color(0xFFF59E0B)
                         )
                         Text(
-                            text = if (stdDev < 30) "Optimal circadian rhythm" else "Variable schedule (7d)",
+                            text = if (stdDev < 30) "Consistent schedule (7d)" else "Variable schedule (7d)",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     } else {
-                        Text(text = "Optimal", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = NeonEmerald)
+                        Text(text = "Consistent", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = NeonEmerald)
                         Text(text = "7-day baseline building", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -837,9 +838,9 @@ fun OvernightBreathingIndicatorsCard(
     var showSymptomsToggles by remember { mutableStateOf(false) }
 
     val (badgeBg, badgeText, badgeColor) = when (report.riskBand) {
-        SleepApneaScreener.ApneaRiskBand.LOW -> Triple(NeonEmerald.copy(alpha = 0.15f), "Low Risk Indicator", NeonEmerald)
-        SleepApneaScreener.ApneaRiskBand.MODERATE -> Triple(Color(0xFFF59E0B).copy(alpha = 0.15f), "Moderate Risk Indicator", Color(0xFFF59E0B))
-        SleepApneaScreener.ApneaRiskBand.ELEVATED -> Triple(RosePulse.copy(alpha = 0.15f), "Elevated Risk Indicator", RosePulse)
+        SleepApneaScreener.ApneaRiskBand.LOW -> Triple(NeonEmerald.copy(alpha = 0.15f), "Typical Variation", NeonEmerald)
+        SleepApneaScreener.ApneaRiskBand.MODERATE -> Triple(Color(0xFFF59E0B).copy(alpha = 0.15f), "Moderate Variation", Color(0xFFF59E0B))
+        SleepApneaScreener.ApneaRiskBand.ELEVATED -> Triple(RosePulse.copy(alpha = 0.15f), "Higher Variation", RosePulse)
         SleepApneaScreener.ApneaRiskBand.INSUFFICIENT_DATA -> Triple(MaterialTheme.colorScheme.surfaceVariant, "Insufficient SpO₂ Data", MaterialTheme.colorScheme.onSurfaceVariant)
     }
 
@@ -884,7 +885,7 @@ fun OvernightBreathingIndicatorsCard(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Nocturnal desaturation screening",
+                            text = "Overnight SpO₂ summary",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1056,7 +1057,7 @@ fun OvernightBreathingIndicatorsCard(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = SleepApneaScreener.DISCLAIMER,
+                    text = "Informational only, not a diagnosis. ${SleepApneaScreener.DISCLAIMER}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 14.sp
@@ -1387,22 +1388,51 @@ fun LongTermTrendsCard(
     isYear: Boolean,
     targetHours: Float
 ) {
-    // Group into weekly aggregates to avoid cluttered 180+ individual night points
-    val weekCount = if (isYear) 26 else 14
-    val weeklyAggregates = remember(allSessions, isYear) {
-        (1..weekCount).map { w ->
-            val score = (74..92).random()
-            val durationHours = 6.8f + (0..15).random() / 10f
-            val deepPct = 16f + (0..10).random()
-            WeeklyData(weekLabel = "W$w", avgScore = score, avgDurationHours = durationHours, avgDeepPercent = deepPct)
+    // Group into weekly aggregates from real sessions
+    val weeklyAggregates: List<WeeklyData> = remember(allSessions, isYear) {
+        val validSessions = allSessions.filter { it.durationMinutes > 0 }.sortedBy { it.startTime }
+        if (validSessions.isEmpty()) {
+            emptyList()
+        } else {
+            val cal = Calendar.getInstance()
+            val groupedByWeek = validSessions.groupBy { session ->
+                cal.timeInMillis = session.startTime
+                val year = cal.get(Calendar.YEAR)
+                val week = cal.get(Calendar.WEEK_OF_YEAR)
+                year to week
+            }
+            val maxWeeks = if (isYear) 26 else 14
+            groupedByWeek.entries.toList().takeLast(maxWeeks).mapIndexed { index, (_, weekSessions) ->
+                val scores = weekSessions.map { it.sleepScore }.filter { it > 0 }
+                val avgScore = if (scores.isNotEmpty()) scores.average().toInt() else 0
+                val avgDurationHours = weekSessions.map { it.durationMinutes }.average().toFloat() / 60f
+                val totalDuration = weekSessions.sumOf { it.durationMinutes }.toFloat()
+                val totalDeep = weekSessions.sumOf { it.deepMinutes }.toFloat()
+                val avgDeepPercent = if (totalDuration > 0) (totalDeep / totalDuration) * 100f else 0f
+                WeeklyData(
+                    weekLabel = "W${index + 1}",
+                    avgScore = avgScore,
+                    avgDurationHours = avgDurationHours,
+                    avgDeepPercent = avgDeepPercent
+                )
+            }
         }
     }
 
+    if (weeklyAggregates.isEmpty()) {
+        EmptyState(
+            message = "No sleep records recorded for long-term trends",
+            icon = Icons.Default.Nightlight,
+            testTag = "sleep_trends_empty"
+        )
+        return
+    }
+
     val bestWeek = remember(weeklyAggregates) {
-        weeklyAggregates.maxByOrNull { it.avgScore } ?: WeeklyData("W1", 85, 7.5f, 20f)
+        weeklyAggregates.maxByOrNull { it.avgScore } ?: weeklyAggregates.first()
     }
     val worstWeek = remember(weeklyAggregates) {
-        weeklyAggregates.minByOrNull { it.avgScore } ?: WeeklyData("W1", 72, 6.5f, 15f)
+        weeklyAggregates.minByOrNull { it.avgScore } ?: weeklyAggregates.first()
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -1844,7 +1874,7 @@ fun SleepCalendarView(
                                     cellCal.get(Calendar.DAY_OF_YEAR) == selectedCalendar.get(Calendar.DAY_OF_YEAR)
 
                             val nightSession = sessionsByDate[dateStr]
-                            val score = nightSession?.sleepScore ?: if (thisDay in 1..28) (74..92).random() else null
+                            val score = nightSession?.sleepScore?.takeIf { it > 0 }
 
                             val scoreColor = when {
                                 score == null -> Color.Transparent

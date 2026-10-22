@@ -30,7 +30,7 @@ data class SleepSegment(
  */
 object SleepRecordParser {
     const val RECORD_SIZE = 7
-    const val NIGHT_GAP_MS = 4L * 60L * 60L * 1000L
+    const val NIGHT_GAP_MS = 8L * 60L * 60L * 1000L
     const val COMPLETED_AFTER_END_MS = 2L * 60L * 1000L
 
     private const val EPOCH_2000_UTC_MS = 946_684_800_000L

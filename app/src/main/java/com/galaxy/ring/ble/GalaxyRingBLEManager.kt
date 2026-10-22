@@ -992,7 +992,7 @@ class GalaxyRingBLEManager(
      * 3) History is PAGED: keep requesting 0x0505 until empty page or no more data
      * 4) Log full payload hex every page
      * 5) Parse best-effort: start/end or duration + stages; save one SleepSession per night to Room + Health Connect
-     * 6) Per PulseLoop/SDK: after a sleep page is fully imported, may need DELETE (keyFlag 0x30) on 0x0505 so the ring advances
+     * 6) No DELETE calls: re-sync avoids duplicate nights via SleepPageStore keying by timestamp and Room DAO delete-then-insert.
      * 7) Timeout 12s per page, 1 retry; do not invent sleep if empty
      *
      * Also caches working path metadata (key and advance mechanism).
@@ -1001,13 +1001,11 @@ class GalaxyRingBLEManager(
         gatt: BluetoothGatt,
         cachedRequiresDelete: Boolean = false
     ): SleepSyncHistoryResult {
-        AppLog.i(tag, "Starting 0x0505 Paged Sleep History Fetch (timeout 12s/page, 1 retry, cachedRequiresDelete=$cachedRequiresDelete)...")
+        AppLog.i(tag, "Starting 0x0505 Paged Sleep History Fetch (timeout 12s/page, 1 retry)...")
         val importedSessions = mutableListOf<com.galaxy.ring.data.SleepSession>()
-        var requiresDelete = cachedRequiresDelete
         var pageNum = 1
         val maxPages = 30
         var previousPagePayloadHex: String? = null
-        var deleteRetryUsedForCurrentPage = false
 
         val readCommandFrame = Protocol.buildSleepCommand(Protocol.KEY_FLAG_READ)
         val readTxHex = readCommandFrame.joinToString(" ") { "%02X".format(it) }
@@ -1023,20 +1021,8 @@ class GalaxyRingBLEManager(
             )
 
             if (reply == null) {
-                // If second or subsequent page timed out without delete, per PulseLoop/SDK try DELETE (0x30)
-                if (pageNum > 1 && !requiresDelete && !deleteRetryUsedForCurrentPage && importedSessions.isNotEmpty()) {
-                    AppLog.i(tag, "Page $pageNum timed out without delete. Per PulseLoop/SDK, sending DELETE (0x30) on 0x0505 so ring advances...")
-                    val delFrame = Protocol.buildSleepDeleteCommand()
-                    val delReply = executeCommand(gatt, delFrame, Protocol.KEY_SLEEP, timeoutMs = 5000L, maxRetries = 1)
-                    AppLog.i(tag, "DELETE 0x0505 sent. Result: ${delReply?.fullPayload?.joinToString(" ") { "%02X".format(it) } ?: "none/ack"}")
-                    requiresDelete = true
-                    deleteRetryUsedForCurrentPage = true
-                    delay(300)
-                    continue // Retry reading this page now that delete was sent
-                } else {
-                    AppLog.i(tag, "Page $pageNum received 0 RX from ring after 12s timeout and 1 retry. End of paged history.")
-                    break
-                }
+                AppLog.i(tag, "Page $pageNum received 0 RX from ring after 12s timeout and 1 retry. End of paged history.")
+                break
             }
 
             val rxHex = reply.fullPayload.joinToString(" ") { "%02X".format(it) }
@@ -1048,21 +1034,10 @@ class GalaxyRingBLEManager(
                 break
             }
 
-            // Check if ring returned identical page payload to previous page
+            // Check if ring returned identical page payload to previous page (reached end of distinct history)
             if (rxHex == previousPagePayloadHex) {
-                if (!requiresDelete && !deleteRetryUsedForCurrentPage) {
-                    AppLog.i(tag, "0x0505 Sleep Page $pageNum returned duplicate payload. Ring requires DELETE (0x30) to advance.")
-                    val delFrame = Protocol.buildSleepDeleteCommand()
-                    val delReply = executeCommand(gatt, delFrame, Protocol.KEY_SLEEP, timeoutMs = 5000L, maxRetries = 1)
-                    AppLog.i(tag, "DELETE 0x0505 sent. Result: ${delReply?.fullPayload?.joinToString(" ") { "%02X".format(it) } ?: "none/ack"}")
-                    requiresDelete = true
-                    deleteRetryUsedForCurrentPage = true
-                    delay(300)
-                    continue // Retry reading next page
-                } else {
-                    AppLog.i(tag, "0x0505 Sleep Page $pageNum returned duplicate data and DELETE already applied; end of history.")
-                    break
-                }
+                AppLog.i(tag, "0x0505 Sleep Page $pageNum returned duplicate data; end of history.")
+                break
             }
 
             // Parse best-effort: start/end or duration + stages
@@ -1071,17 +1046,6 @@ class GalaxyRingBLEManager(
                 AppLog.i(tag, "Page $pageNum parsed successfully: ${session.durationMinutes} mins (${session.stages.size} stages)")
                 importedSessions.add(session)
                 previousPagePayloadHex = rxHex
-                deleteRetryUsedForCurrentPage = false
-
-                // If ring requires delete to advance, send DELETE on 0x0505 after importing page
-                if (requiresDelete) {
-                    AppLog.i(tag, "Sending DELETE (0x30) on 0x0505 for page $pageNum to advance ring FIFO...")
-                    val delFrame = Protocol.buildSleepDeleteCommand()
-                    val delReply = executeCommand(gatt, delFrame, Protocol.KEY_SLEEP, timeoutMs = 5000L, maxRetries = 1)
-                    AppLog.i(tag, "DELETE for page $pageNum completed: ${delReply?.fullPayload?.joinToString(" ") { "%02X".format(it) } ?: "acknowledged"}")
-                    delay(200)
-                }
-
                 pageNum++
                 delay(150)
             } else {
@@ -1090,10 +1054,10 @@ class GalaxyRingBLEManager(
             }
         }
 
-        AppLog.i(tag, "0x0505 Paged Sleep Fetch finished: ${importedSessions.size} session(s) imported. requiresDeleteToAdvance=$requiresDelete")
+        AppLog.i(tag, "0x0505 Paged Sleep Fetch finished: ${importedSessions.size} session(s) imported.")
         return SleepSyncHistoryResult(
             sessions = importedSessions,
-            requiresDeleteToAdvance = requiresDelete,
+            requiresDeleteToAdvance = false,
             workingKey = Protocol.KEY_SLEEP
         )
     }

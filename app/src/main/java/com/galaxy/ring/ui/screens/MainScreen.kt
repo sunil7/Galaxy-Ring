@@ -119,11 +119,10 @@ import com.galaxy.ring.data.SleepSession
 import com.galaxy.ring.data.SleepStage
 import com.galaxy.ring.data.StressSample
 import com.galaxy.ring.data.SyncStatus
-import com.galaxy.ring.ui.components.EmptyState
-import com.galaxy.ring.ui.components.MetricCard
-import com.galaxy.ring.ui.components.SectionHeader
 import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
+import com.galaxy.ring.ui.theme.EmptyState
+import com.galaxy.ring.ui.theme.MetricCard
 import com.galaxy.ring.ui.theme.NeonEmerald
 import com.galaxy.ring.ui.theme.RosePulse
 import kotlinx.coroutines.launch
@@ -216,7 +215,8 @@ fun MainScreen(
                         bleRepo.startScan()
                         showScanSheet = true
                     }
-                }
+                },
+                onAdminClick = { showAdminScreen = true }
             )
         },
         bottomBar = {
@@ -310,7 +310,8 @@ fun MainScreen(
                         onOpenRationale = onOpenRationale,
                         onNavigateToSleep = { selectedTab = 1 },
                         onNavigateToHeart = { selectedTab = 2 },
-                        onNavigateToActivity = { selectedTab = 3 }
+                        onNavigateToActivity = { selectedTab = 3 },
+                        onOpenAdmin = { showAdminScreen = true }
                     )
                 }
                 1 -> {
@@ -343,7 +344,7 @@ fun MainScreen(
                         onOpenHealthRationale = onOpenRationale,
                         hasHealthPermissions = hasHealthPermissions,
                         onRequestHealthPermissions = onRequestHealthPermissions,
-                        onAdminClick = { showAdminScreen = true }
+                        onOpenAdmin = { showAdminScreen = true }
                     )
                 }
             }
@@ -405,7 +406,8 @@ fun DeviceDashboard(
     onOpenRationale: () -> Unit,
     onNavigateToSleep: () -> Unit,
     onNavigateToHeart: () -> Unit = {},
-    onNavigateToActivity: () -> Unit = {}
+    onNavigateToActivity: () -> Unit = {},
+    onOpenAdmin: () -> Unit = {}
 ) {
     val app = GalaxyRingApp.instance
     val repo = app.healthRepository
@@ -718,8 +720,10 @@ fun RingStatusPill(
 
 @Composable
 fun ConnectionStatusBanner(
-    connectionState: ConnectionState
+    connectionState: ConnectionState,
+    onOpenAdmin: () -> Unit = {}
 ) {
+    val isZeroRxReady = connectionState is ConnectionState.Ready && connectionState.rxCountSinceConnect == 0
     val (bgColor, textColor, icon, label) = when (connectionState) {
         is ConnectionState.Ready -> {
             if (connectionState.rxCountSinceConnect == 0) {
@@ -727,7 +731,7 @@ fun ConnectionStatusBanner(
                     Color(0xFFF59E0B).copy(alpha = 0.15f),
                     Color(0xFFF59E0B),
                     Icons.Default.Error,
-                    "Connected but 0 RX from ring. Commands may be ignored."
+                    "Connected but 0 RX from ring. Commands may be ignored. Open Admin logs."
                 )
             } else {
                 Quadruple(
@@ -783,7 +787,9 @@ fun ConnectionStatusBanner(
     }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = isZeroRxReady) { onOpenAdmin() },
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = bgColor)
     ) {
@@ -831,7 +837,8 @@ fun ManualMeasurementsCard(
     onMeasureHeartRate: () -> Unit,
     onMeasureSpo2: () -> Unit,
     onMeasureHrv: () -> Unit,
-    onMeasureStress: () -> Unit
+    onMeasureStress: () -> Unit,
+    onOpenAdmin: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -953,6 +960,16 @@ fun ManualMeasurementsCard(
                             modifier = Modifier.weight(1f)
                         )
                     }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "→ View TX/RX hex & export logs in Admin / Debug",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = CyberCyan,
+                        modifier = Modifier
+                            .clickable { onOpenAdmin() }
+                            .padding(start = 26.dp)
+                    )
                 }
                 Spacer(modifier = Modifier.height(14.dp))
             }
@@ -1117,7 +1134,7 @@ fun SleepGoalProgressRingCard(
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = "Quality score: ${sleep?.qualityScore ?: 0}/100 • Latest reading",
+                        text = "Quality score: ${sleep?.qualityScore ?: 0}/100 • Restorative sleep",
                         style = MaterialTheme.typography.bodySmall,
                         color = ElectricViolet
                     )
@@ -1243,13 +1260,14 @@ fun Spo2Card(
                         modifier = Modifier.padding(bottom = 6.dp)
                     )
                     Spacer(modifier = Modifier.weight(1f))
+                    val isOptimal = spo2Val >= 95f
                     Text(
-                        text = "Latest reading",
+                        text = if (isOptimal) "Optimal Oxygenation" else "Sub-optimal",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (isOptimal) NeonEmerald else Color(0xFFF59E0B),
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .background((if (isOptimal) NeonEmerald else Color(0xFFF59E0B)).copy(alpha = 0.15f))
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
@@ -1351,13 +1369,23 @@ fun HrvCard(
                         modifier = Modifier.padding(bottom = 6.dp)
                     )
                     Spacer(modifier = Modifier.weight(1f))
+                    val statusLabel = when {
+                        hrvVal >= 50 -> "High Recovery"
+                        hrvVal >= 30 -> "Normal"
+                        else -> "Elevated Fatigue"
+                    }
+                    val statusColor = when {
+                        hrvVal >= 50 -> NeonEmerald
+                        hrvVal >= 30 -> CyberCyan
+                        else -> Color(0xFFF59E0B)
+                    }
                     Text(
-                        text = "Latest reading",
+                        text = statusLabel,
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = statusColor,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .background(statusColor.copy(alpha = 0.15f))
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
@@ -1521,12 +1549,18 @@ fun StressCard(
 fun GalaxyRingTopBar(
     connectionState: ConnectionState,
     snapshot: RingHealthSnapshot,
-    onScanClick: () -> Unit
+    onScanClick: () -> Unit,
+    onAdminClick: () -> Unit = {}
 ) {
     TopAppBar(
         title = {
             Row(
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.pointerInput(Unit) {
+                    detectTapGestures(
+                        onLongPress = { onAdminClick() }
+                    )
+                }
             ) {
                 Box(
                     modifier = Modifier
@@ -2111,7 +2145,7 @@ fun HeartRateCard(
                     )
                 }
                 Text(
-                    text = if (hasHr) "Latest reading" else "No Data",
+                    text = if (hasHr) "Resting PPG" else "No Data",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -2136,12 +2170,12 @@ fun HeartRateCard(
                     )
                     Spacer(modifier = Modifier.weight(1f))
                     Text(
-                        text = "Latest value",
+                        text = "Zone: Resting",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = NeonEmerald,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .background(NeonEmerald.copy(alpha = 0.15f))
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
@@ -2378,7 +2412,7 @@ fun BatteryCard(battery: com.galaxy.ring.data.RingBattery) {
                 } else if (battery.isCharging) {
                     "Charging now"
                 } else {
-                    "Estimated ~${battery.estimatedDaysLeft.toInt()} days left"
+                    "~${battery.estimatedDaysLeft.toInt()} days left"
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = if (hasBattery) NeonEmerald else MaterialTheme.colorScheme.onSurfaceVariant

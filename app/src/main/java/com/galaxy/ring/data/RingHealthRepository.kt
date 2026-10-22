@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.galaxy.ring.debug.AppLog
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -366,25 +367,6 @@ class RingHealthRepository(private val context: Context) {
 
     suspend fun saveManualSleepSession(dateStr: String, startTime: Long, endTime: Long): Long {
         val durationMinutes = ((endTime - startTime) / 60000L).coerceAtLeast(30L)
-        // Synthesize standard sleep stage distribution for manually logged sleep
-        val deepMins = (durationMinutes * 0.22).toLong()
-        val remMins = (durationMinutes * 0.24).toLong()
-        val awakeMins = (durationMinutes * 0.06).toLong()
-        val lightMins = durationMinutes - deepMins - remMins - awakeMins
-
-        val stages = listOf(
-            SleepStageRecord(SleepStage.LIGHT, startTime, startTime + (lightMins / 2) * 60000L),
-            SleepStageRecord(SleepStage.DEEP, startTime + (lightMins / 2) * 60000L, startTime + (lightMins / 2 + deepMins) * 60000L),
-            SleepStageRecord(SleepStage.REM, startTime + (lightMins / 2 + deepMins) * 60000L, startTime + (lightMins / 2 + deepMins + remMins) * 60000L),
-            SleepStageRecord(SleepStage.LIGHT, startTime + (lightMins / 2 + deepMins + remMins) * 60000L, endTime - awakeMins * 60000L),
-            SleepStageRecord(SleepStage.AWAKE, endTime - awakeMins * 60000L, endTime)
-        )
-        val session = SleepSession(
-            startTime = startTime,
-            endTime = endTime,
-            stages = stages
-        )
-        val analysis = SleepAnalyzer.analyze(session, (sleepTargetHours * 60).toLong())
         // Delete any existing session for this date to avoid duplicate records
         sleepDao.deleteForDate(dateStr)
 
@@ -393,16 +375,16 @@ class RingHealthRepository(private val context: Context) {
             startTime = startTime,
             endTime = endTime,
             durationMinutes = durationMinutes,
-            deepMinutes = deepMins,
-            lightMinutes = lightMins,
-            remMinutes = remMins,
-            awakeMinutes = awakeMins,
-            sleepScore = analysis.sleepScore,
-            sleepEfficiency = analysis.sleepEfficiency,
+            deepMinutes = 0L,
+            lightMinutes = 0L,
+            remMinutes = 0L,
+            awakeMinutes = 0L,
+            sleepScore = 0,
+            sleepEfficiency = 0f,
             stagesJson = ""
         )
         val id = sleepDao.insert(entity)
-        AppLog.d(tag, "Saved manual sleep override for date=$dateStr ($durationMinutes mins, score=${analysis.sleepScore})")
+        AppLog.d(tag, "Saved manual sleep override for date=$dateStr ($durationMinutes mins, no invented score/stages)")
         return id
     }
 
@@ -480,21 +462,35 @@ class RingHealthRepository(private val context: Context) {
     /**
      * Saves a list of workout sessions to Room DB.
      * Never invents synthetic sessions.
+     * Replaces any existing records with the same (startTime, sportType).
      */
     suspend fun saveWorkoutSessions(sessions: List<WorkoutSession>) {
         if (sessions.isEmpty()) return
-        val entities = sessions.map { it.toEntity() }
-        workoutDao.insertAll(entities)
-        AppLog.i(tag, "Saved ${sessions.size} workout session(s) to Room DB")
+        for (session in sessions) {
+            saveWorkoutSession(session)
+        }
+        AppLog.i(tag, "Saved ${sessions.size} workout session(s) to Room DB (replaced by (startTime, sportType))")
     }
 
     /**
      * Saves a single workout session to Room DB.
+     * Replaces any existing record with the same (startTime, sportType).
      */
     suspend fun saveWorkoutSession(session: WorkoutSession): Long {
+        // Replace existing row for the same (startTime, sportType)
+        val byStart = workoutDao.findWorkoutByStartTime(session.startTime)
+        if (byStart != null && byStart.sportType == session.sportType) {
+            workoutDao.deleteById(byStart.id)
+        }
+        val existingOnDate = workoutDao.getWorkoutsForDate(session.date).first()
+        for (ex in existingOnDate) {
+            if (ex.startTime == session.startTime && ex.sportType == session.sportType) {
+                workoutDao.deleteById(ex.id)
+            }
+        }
         val entity = session.toEntity()
         val id = workoutDao.insert(entity)
-        AppLog.i(tag, "Saved workout session: id=$id, type=${session.sportTypeName}, dur=${session.durationSeconds}s")
+        AppLog.i(tag, "Saved workout session: id=$id, type=${session.sportTypeName}, start=${session.startTime}, dur=${session.durationSeconds}s")
         return id
     }
 

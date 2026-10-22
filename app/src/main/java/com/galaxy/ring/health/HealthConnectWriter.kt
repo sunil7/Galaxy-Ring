@@ -369,7 +369,7 @@ class HealthConnectWriter(private val context: Context) {
             }
         }
 
-        // 4. Write ring's skin temperature readings (BodyTemperatureRecord)
+        // 4. Write Body/Skin Temperature
         try {
             val temp = snapshot.temperature
             if (temp.temperatureCelsius in 25f..45f) {
@@ -386,10 +386,10 @@ class HealthConnectWriter(private val context: Context) {
                 )
                 client.insertRecords(listOf(tempRecord))
                 writeCount++
-                AppLog.i(tag, "Health Connect: Ring skin temperature written successfully (BodyTemperatureRecord): ${temp.temperatureCelsius}°C")
+                AppLog.i(tag, "Health Connect: BodyTemperatureRecord written successfully: ${temp.temperatureCelsius}°C")
             }
         } catch (e: Exception) {
-            AppLog.e(tag, "Health Connect: Error inserting ring skin temperature (BodyTemperatureRecord): ${e.message}", e)
+            AppLog.e(tag, "Health Connect: Error inserting BodyTemperatureRecord: ${e.message}", e)
         }
 
         // 5. Write Sleep if present

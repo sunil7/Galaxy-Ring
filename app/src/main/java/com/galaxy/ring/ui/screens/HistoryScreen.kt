@@ -77,10 +77,6 @@ import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
 import com.galaxy.ring.ui.theme.NeonEmerald
 import com.galaxy.ring.ui.theme.RosePulse
-import com.galaxy.ring.ui.theme.ShapeLarge
-import com.galaxy.ring.ui.theme.ShapeMedium
-import com.galaxy.ring.ui.theme.ShapeSmall
-import com.galaxy.ring.ui.theme.Spacing
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -533,25 +529,18 @@ fun Spo2DayTimelineCard(
                     MetricPill(label = "Max", value = "$maxSpo2", unit = "%", color = ElectricViolet)
                 }
 
-                Spacer(modifier = Modifier.height(Spacing.md))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                // 24h Line Chart Canvas: Compute range from data with padding
-                val rawMin = samples.minOf { it.percentage }
-                val rawMax = samples.maxOf { it.percentage }
-                // Dynamic range with padding ensures readings (including values below 90, e.g. 84%) stay visible
-                val computedMin = (rawMin - 3f).coerceAtMost(88f).coerceAtLeast(60f)
-                val computedMax = (rawMax + 2f).coerceAtLeast(100f)
-                val guidelines = listOf(80f, 85f, 90f, 95f, 100f).filter { it in computedMin..computedMax }
-
+                // 24h Line Chart Canvas (85% - 100%)
                 Day24hLineChart(
                     samples = samples.map { ChartPoint(timestamp = it.timestamp, value = it.percentage) },
                     scheduleIntervalMinutes = scheduleIntervalMinutes,
                     selectedCalendar = selectedCalendar,
-                    minValue = computedMin,
-                    maxValue = computedMax,
+                    minValue = 85f,
+                    maxValue = 100f,
                     unit = "%",
                     lineColor = CyberCyan,
-                    guidelineValues = guidelines
+                    guidelineValues = listOf(90f, 95f, 100f)
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -746,51 +735,30 @@ fun Day24hLineChart(
                         }
                     }
 
-                    // Draw sample dots with below-range marker for SpO2 < 90%
-                    points.forEachIndexed { idx, pt ->
-                        val sampleVal = sorted[idx].value
-                        val isBelowThreshold = unit == "%" && sampleVal < 90f
-                        if (isBelowThreshold) {
-                            // "Below range" marker: outer attention halo ensuring < 90% readings stay prominent
-                            drawCircle(
-                                color = RosePulse.copy(alpha = 0.35f),
-                                radius = 7.dp.toPx(),
-                                center = pt
-                            )
-                            drawCircle(
-                                color = Color(0xFF0F172A),
-                                radius = 4.5.dp.toPx(),
-                                center = pt
-                            )
-                            drawCircle(
-                                color = RosePulse,
-                                radius = 3.dp.toPx(),
-                                center = pt
-                            )
-                        } else {
-                            drawCircle(
-                                color = Color(0xFF0F172A),
-                                radius = 4.5.dp.toPx(),
-                                center = pt
-                            )
-                            drawCircle(
-                                color = lineColor,
-                                radius = 3.dp.toPx(),
-                                center = pt
-                            )
-                        }
+                    // Draw sample dots
+                    points.forEach { pt ->
+                        drawCircle(
+                            color = Color(0xFF0F172A),
+                            radius = 4.5.dp.toPx(),
+                            center = pt
+                        )
+                        drawCircle(
+                            color = lineColor,
+                            radius = 3.dp.toPx(),
+                            center = pt
+                        )
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(Spacing.xxs))
+        Spacer(modifier = Modifier.height(4.dp))
 
         // Time Axis Labels (Night, Morning, Afternoon, Evening)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = Spacing.xxs),
+                .padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(text = "00:00 (Night)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -800,36 +768,21 @@ fun Day24hLineChart(
             Text(text = "24:00", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
-        Spacer(modifier = Modifier.height(Spacing.xs))
+        Spacer(modifier = Modifier.height(6.dp))
 
-        // Gap and below-range indicator legend
+        // Gap indicator legend
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (unit == "%" && samples.any { it.value < 90f }) {
-                Box(
-                    modifier = Modifier
-                        .size(Spacing.xs)
-                        .clip(CircleShape)
-                        .background(RosePulse)
-                )
-                Spacer(modifier = Modifier.width(Spacing.xxs))
-                Text(
-                    text = "Below range (< 90%)",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = RosePulse
-                )
-                Spacer(modifier = Modifier.width(Spacing.md))
-            }
             Box(
                 modifier = Modifier
                     .size(6.dp)
                     .clip(CircleShape)
                     .background(Color(0xFFF59E0B))
             )
-            Spacer(modifier = Modifier.width(Spacing.xxs))
+            Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = "Gap marker (> 2× interval)",
                 style = MaterialTheme.typography.labelSmall,
