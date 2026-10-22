@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,14 +23,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.Info
@@ -50,57 +51,53 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.galaxy.ring.GalaxyRingApp
+import com.galaxy.ring.data.ConnectionState
 import com.galaxy.ring.data.MonitorConfig
 import com.galaxy.ring.data.MonitorMetric
 import com.galaxy.ring.data.MonitoringSchedule
 import com.galaxy.ring.data.MonitoringSettings
 import com.galaxy.ring.data.ScreenBrightness
 import com.galaxy.ring.sync.RingScheduledService
+import com.galaxy.ring.ui.components.SectionHeader
 import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
 import com.galaxy.ring.ui.theme.NeonEmerald
 import com.galaxy.ring.ui.theme.RosePulse
-import androidx.compose.material.icons.filled.BugReport
-import android.widget.Toast
+import com.galaxy.ring.ui.theme.ShapeMedium
+import com.galaxy.ring.ui.theme.ShapeSmall
+import com.galaxy.ring.ui.theme.Spacing
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
-import com.galaxy.ring.data.ConnectionState
 
 @Composable
 fun SettingsScreen(
     onOpenHealthRationale: () -> Unit,
     hasHealthPermissions: Boolean,
     onRequestHealthPermissions: () -> Unit = {},
-    onOpenAdmin: () -> Unit = {}
+    onOpenAdmin: () -> Unit = {},
+    onAdminClick: () -> Unit = onOpenAdmin
 ) {
     val context = LocalContext.current
     val app = GalaxyRingApp.instance
     val repo = app.healthRepository
     val scope = rememberCoroutineScope()
-    var adminTapCount by remember { mutableIntStateOf(0) }
-    var isAdminUnlocked by remember { mutableStateOf(true) }
 
     var isKeepConnected by remember { mutableStateOf(repo.isKeepConnected) }
     var isBondingEnabled by remember { mutableStateOf(repo.isBondingEnabled) }
-    var isRingDisplayEnabled by remember { mutableStateOf(repo.isRingDisplayEnabled) }
-    var displayStatusMessage by remember { mutableStateOf<String?>(null) }
     val monitoringSettings = remember { MonitoringSettings(context) }
     var selectedBrightness by remember { mutableStateOf(monitoringSettings.screenBrightness) }
     var brightnessStatusMessage by remember { mutableStateOf<String?>(null) }
@@ -156,10 +153,10 @@ fun SettingsScreen(
                 )
             },
             title = {
-                Text("Samsung / Android Battery Setting")
+                Text("Background Battery Setting")
             },
             text = {
-                Text("Samsung One UI and Android power managers put background processes into deep sleep. To keep Galaxy Ring connected and run scheduled checks reliably when the screen is locked, exclude the app from battery restrictions.")
+                Text("System power managers may pause background processes. To keep Galaxy Ring connected and run scheduled checks reliably when the screen is locked, exclude the app from battery restrictions.")
             },
             confirmButton = {
                 Button(
@@ -177,13 +174,20 @@ fun SettingsScreen(
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                 ) {
-                    Text("Exclude App", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                    Text("Exclude App", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                OutlinedButton(onClick = { showBatteryPromptDialog = false }) {
+                OutlinedButton(
+                    onClick = { showBatteryPromptDialog = false },
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                ) {
                     Text("Later")
                 }
             }
@@ -193,95 +197,27 @@ fun SettingsScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
-        item { Spacer(modifier = Modifier.height(4.dp)) }
+        item { Spacer(modifier = Modifier.height(Spacing.xxs)) }
 
-        // Top Section Card: Admin / Debug (Clearly visible, single tap)
+        // Section: Connection & Pairing
         item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("admin_debug_top_card"),
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = CyberCyan.copy(alpha = 0.12f)),
-                border = androidx.compose.foundation.BorderStroke(1.5.dp, CyberCyan.copy(alpha = 0.45f))
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(CircleShape)
-                                    .background(CyberCyan),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.BugReport,
-                                    contentDescription = null,
-                                    tint = Color(0xFF0F172A),
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Admin / Debug",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "View BLE logs, export for troubleshooting",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Button(
-                        onClick = onOpenAdmin,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("open_admin_panel_button"),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.BugReport,
-                            contentDescription = null,
-                            tint = Color(0xFF0F172A),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Open Admin Panel",
-                            color = Color(0xFF0F172A),
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                    }
-                }
-            }
+            SectionHeader(
+                title = "Connection & Pairing",
+                subtitle = "Manage BLE GATT link persistence and OS bonding"
+            )
         }
-
-        // 1. Connection Keep-Alive & Pairing Section
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                shape = ShapeMedium,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
+                Column(modifier = Modifier.padding(Spacing.md)) {
+                    // Keep ring connected row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -289,13 +225,14 @@ fun SettingsScreen(
                     ) {
                         Row(
                             modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                         ) {
                             Box(
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
-                                    .background(CyberCyan.copy(alpha = 0.2f)),
+                                    .background(CyberCyan.copy(alpha = 0.15f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -305,7 +242,6 @@ fun SettingsScreen(
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
                                     text = "Keep ring connected",
@@ -336,13 +272,19 @@ fun SettingsScreen(
                                     }
                                 }
                             },
-                            modifier = Modifier.testTag("keep_connected_toggle"),
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF0F172A), checkedTrackColor = CyberCyan)
+                            modifier = Modifier
+                                .testTag("keep_connected_toggle")
+                                .defaultMinSize(minHeight = 48.dp, minWidth = 48.dp),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.surface,
+                                checkedTrackColor = CyberCyan
+                            )
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
 
+                    // Pair / bond ring row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -350,13 +292,14 @@ fun SettingsScreen(
                     ) {
                         Row(
                             modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                         ) {
                             Box(
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
-                                    .background(ElectricViolet.copy(alpha = 0.2f)),
+                                    .background(ElectricViolet.copy(alpha = 0.15f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -366,7 +309,6 @@ fun SettingsScreen(
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
                                     text = "Pair / bond ring",
@@ -388,12 +330,17 @@ fun SettingsScreen(
                                 isBondingEnabled = enabled
                                 repo.isBondingEnabled = enabled
                             },
-                            modifier = Modifier.testTag("bonding_toggle"),
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF0F172A), checkedTrackColor = ElectricViolet)
+                            modifier = Modifier
+                                .testTag("bonding_toggle")
+                                .defaultMinSize(minHeight = 48.dp, minWidth = 48.dp),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.surface,
+                                checkedTrackColor = ElectricViolet
+                            )
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
                     Text(
                         text = "Note: Pairing improves reconnection; keeping the link while the app is closed requires the foreground service notification ('Keep ring connected').",
                         style = MaterialTheme.typography.bodySmall,
@@ -403,23 +350,31 @@ fun SettingsScreen(
             }
         }
 
-        // 1b. Screen Brightness Section
+        // Section: Display
+        item {
+            SectionHeader(
+                title = "Display",
+                subtitle = "Ring indicator brightness level"
+            )
+        }
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                shape = ShapeMedium,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
+                Column(modifier = Modifier.padding(Spacing.md)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
-                                .background(CyberCyan.copy(alpha = 0.2f)),
+                                .background(CyberCyan.copy(alpha = 0.15f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -429,7 +384,6 @@ fun SettingsScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
                                 text = "Screen brightness",
@@ -445,11 +399,11 @@ fun SettingsScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
                     ) {
                         ScreenBrightness.values().forEach { brightness ->
                             val selected = selectedBrightness == brightness
@@ -468,17 +422,19 @@ fun SettingsScreen(
                                     }
                                 },
                                 label = { Text(brightness.label, style = MaterialTheme.typography.labelSmall) },
-                                modifier = Modifier.testTag("brightness_chip_${brightness.name.lowercase()}"),
+                                modifier = Modifier
+                                    .testTag("brightness_chip_${brightness.name.lowercase()}")
+                                    .defaultMinSize(minHeight = 48.dp),
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = CyberCyan,
-                                    selectedLabelColor = Color(0xFF0F172A)
+                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary
                                 )
                             )
                         }
                     }
 
                     if (brightnessStatusMessage != null) {
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(Spacing.xs))
                         Text(
                             text = brightnessStatusMessage!!,
                             style = MaterialTheme.typography.bodySmall,
@@ -490,23 +446,31 @@ fun SettingsScreen(
             }
         }
 
-        // 2. Health Monitoring Section
+        // Section: Health Monitoring
+        item {
+            SectionHeader(
+                title = "Health Monitoring",
+                subtitle = "Automated background biometric logging schedules"
+            )
+        }
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                shape = ShapeMedium,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
+                Column(modifier = Modifier.padding(Spacing.md)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
-                                .background(CyberCyan.copy(alpha = 0.2f)),
+                                .background(CyberCyan.copy(alpha = 0.15f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -516,23 +480,22 @@ fun SettingsScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "Health Monitoring",
+                                text = "Automated Checks",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Automated background biometric logging",
+                                text = "Configurable measurement intervals",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
 
                     // 1. All-day Heart Rate
                     HealthMonitoringMetricRow(
@@ -550,9 +513,9 @@ fun SettingsScreen(
                         }
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)))
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
 
                     // 2. Regular Blood oxygen
                     HealthMonitoringMetricRow(
@@ -570,9 +533,9 @@ fun SettingsScreen(
                         }
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)))
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
 
                     // 3. Regular HRV
                     HealthMonitoringMetricRow(
@@ -590,9 +553,9 @@ fun SettingsScreen(
                         }
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)))
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
 
                     // 4. Scheduled Stress
                     HealthMonitoringMetricRow(
@@ -610,9 +573,9 @@ fun SettingsScreen(
                         }
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)))
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
 
                     // Last Run info
                     Text(
@@ -621,7 +584,7 @@ fun SettingsScreen(
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(Spacing.xxs))
                     val lastRunTime = if (repo.lastScheduleRunTimestamp > 0) {
                         SimpleDateFormat("MMM d, HH:mm:ss", Locale.getDefault()).format(Date(repo.lastScheduleRunTimestamp))
                     } else {
@@ -644,20 +607,30 @@ fun SettingsScreen(
             }
         }
 
-        // Sleep Breathing & Apnea Screening Self-Report Card
+        // Section: Breathing Symptoms
+        item {
+            SectionHeader(
+                title = "Breathing Risk Factors",
+                subtitle = "Self-reported symptoms for nocturnal breathing assessment"
+            )
+        }
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                shape = ShapeMedium,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.padding(Spacing.md)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                    ) {
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
-                                .background(ElectricViolet.copy(alpha = 0.2f)),
+                                .background(ElectricViolet.copy(alpha = 0.15f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -667,7 +640,6 @@ fun SettingsScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
                                 text = "Sleep Apnea Screening Symptoms",
@@ -683,7 +655,7 @@ fun SettingsScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
 
                     Text(
                         text = "These indicators are used as weighted factors alongside your Galaxy Ring nocturnal SpO₂ and sleep continuity metrics in the Overnight Breathing Indicators screening card:",
@@ -691,11 +663,12 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(Spacing.xs))
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
                             .clickable {
                                 val next = !apneaSnoring
                                 apneaSnoring = next
@@ -711,7 +684,7 @@ fun SettingsScreen(
                             },
                             colors = CheckboxDefaults.colors(checkedColor = CyberCyan)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(Spacing.xs))
                         Text(
                             text = "Habitual or loud snoring",
                             style = MaterialTheme.typography.bodyMedium,
@@ -722,6 +695,7 @@ fun SettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
                             .clickable {
                                 val next = !apneaSleepiness
                                 apneaSleepiness = next
@@ -737,7 +711,7 @@ fun SettingsScreen(
                             },
                             colors = CheckboxDefaults.colors(checkedColor = CyberCyan)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(Spacing.xs))
                         Text(
                             text = "Excessive daytime tiredness / somnolence",
                             style = MaterialTheme.typography.bodyMedium,
@@ -748,6 +722,7 @@ fun SettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
                             .clickable {
                                 val next = !apneaPauses
                                 apneaPauses = next
@@ -763,7 +738,7 @@ fun SettingsScreen(
                             },
                             colors = CheckboxDefaults.colors(checkedColor = CyberCyan)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(Spacing.xs))
                         Text(
                             text = "Observed breathing pauses or gasping during sleep",
                             style = MaterialTheme.typography.bodyMedium,
@@ -774,20 +749,30 @@ fun SettingsScreen(
             }
         }
 
-        // 2. Battery Optimization & Background Execution Card (Samsung One UI Guidance)
+        // Section: System Power Management
+        item {
+            SectionHeader(
+                title = "Power Management",
+                subtitle = "Battery restriction exclusion for background tasks"
+            )
+        }
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                shape = ShapeMedium,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.padding(Spacing.md)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                    ) {
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
-                                .background(NeonEmerald.copy(alpha = 0.2f)),
+                                .background(NeonEmerald.copy(alpha = 0.15f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -797,7 +782,6 @@ fun SettingsScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
                                 text = "Battery Optimization Exclusion",
@@ -813,15 +797,15 @@ fun SettingsScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
 
                     Text(
-                        text = "Samsung One UI and Android power managers put background processes into deep sleep. To keep scheduled checks running reliably when the screen is locked, exclude Galaxy Ring from battery restrictions.",
+                        text = "Android and manufacturer power managers put background processes into deep sleep. To keep scheduled checks running reliably when the screen is locked, exclude Galaxy Ring from battery restrictions.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
 
                     OutlinedButton(
                         onClick = {
@@ -829,7 +813,7 @@ fun SettingsScreen(
                                 try {
                                     val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
                                     context.startActivity(intent)
-                                } catch (e: Exception) {
+                                } catch (_: Exception) {
                                     val appIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                                         data = Uri.fromParts("package", context.packageName, null)
                                     }
@@ -837,18 +821,26 @@ fun SettingsScreen(
                                 }
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp),
+                        shape = ShapeSmall
                     ) {
                         Icon(imageVector = Icons.Outlined.BatteryChargingFull, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(Spacing.xs))
                         Text(if (isIgnoringBatteryOptimizations) "Battery Settings (Active)" else "Exclude from Battery Restrictions")
                     }
                 }
             }
         }
 
-        // 3. Health Connect Integration Status Card
+        // Section: Health Connect
+        item {
+            SectionHeader(
+                title = "Health Connect",
+                subtitle = "Sync biometric readings with on-device Health Connect"
+            )
+        }
         item {
             val healthWriter = app.healthConnectWriter
             val lastWriteTime by healthWriter.lastWriteTimeFlow.collectAsState()
@@ -857,21 +849,25 @@ fun SettingsScreen(
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                shape = ShapeMedium,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
+                Column(modifier = Modifier.padding(Spacing.md)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                        ) {
                             Box(
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
-                                    .background(ElectricViolet.copy(alpha = 0.2f)),
+                                    .background(ElectricViolet.copy(alpha = 0.15f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -881,7 +877,6 @@ fun SettingsScreen(
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
                                     text = "Health Connect Status",
@@ -908,48 +903,51 @@ fun SettingsScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
 
                     if (!hasHealthPermissions) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(ShapeSmall)
                                 .background(RosePulse.copy(alpha = 0.12f))
-                                .padding(12.dp)
+                                .padding(Spacing.sm)
                         ) {
                             Text(
                                 text = "Health Connect permission required to write HR, SpO₂, steps, and sleep records to Android Health Connect.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(Spacing.xs))
                             Button(
                                 onClick = onRequestHealthPermissions,
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .defaultMinSize(minHeight = 48.dp)
                                     .testTag("connect_health_connect_button"),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                                shape = ShapeSmall,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                )
                             ) {
                                 Text(
                                     text = "Connect Health Connect",
-                                    color = Color(0xFF0F172A),
                                     fontWeight = FontWeight.Bold
                                 )
                             }
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(Spacing.sm))
                     }
 
                     // Status Breakdown
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                            .clip(ShapeSmall)
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                            .padding(Spacing.sm),
+                        verticalArrangement = Arrangement.spacedBy(Spacing.xxs + 2.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1025,7 +1023,7 @@ fun SettingsScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(Spacing.xs))
 
                     Text(
                         text = "Synchronizes steps, active and resting heart rate, oxygen saturation (SpO₂), skin temperature, and sleep stages directly with Android Health Connect.",
@@ -1033,20 +1031,20 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(Spacing.xs))
 
-                    // Helpful FW Note for Sleep
                     Text(
-                        text = "Tip: If sleep is empty after overnight wear, open official RWFit once after a night, then sync here (some ring firmware only exposes sleep cache after vendor app handshake).",
+                        text = "Tip: If sleep is empty after overnight wear, open official companion once after a night, then sync here (some ring firmware only exposes sleep cache after vendor handshake).",
                         style = MaterialTheme.typography.labelSmall,
                         color = CyberCyan.copy(alpha = 0.9f)
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
                             .clickable { onOpenHealthRationale() },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -1056,7 +1054,7 @@ fun SettingsScreen(
                             tint = CyberCyan,
                             modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(Spacing.xs))
                         Text(
                             text = "View Permissions Rationale & Data Privacy",
                             style = MaterialTheme.typography.bodySmall,
@@ -1067,17 +1065,103 @@ fun SettingsScreen(
             }
         }
 
+        // Section: More (Admin & Diagnostics strictly under More)
+        item {
+            SectionHeader(
+                title = "More",
+                subtitle = "Diagnostics, BLE logs, and advanced tools"
+            )
+        }
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("admin_debug_card"),
+                shape = ShapeMedium,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(Spacing.md)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(CyberCyan.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.BugReport,
+                                    contentDescription = null,
+                                    tint = CyberCyan,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Admin / Diagnostics",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "View BLE logs, local history database, export for troubleshooting",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+
+                    Button(
+                        onClick = onAdminClick,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("open_admin_panel_button"),
+                        shape = ShapeSmall,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.BugReport,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(Spacing.xs))
+                        Text(
+                            text = "Open Admin Panel",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                    }
+                }
+            }
+        }
+
         // App version info
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                shape = ShapeSmall,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
+                        .padding(Spacing.md),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
@@ -1096,7 +1180,7 @@ fun SettingsScreen(
             }
         }
 
-        item { Spacer(modifier = Modifier.height(32.dp)) }
+        item { Spacer(modifier = Modifier.height(Spacing.lg)) }
     }
 }
 
@@ -1130,19 +1214,21 @@ private fun HealthMonitoringMetricRow(
             Switch(
                 checked = config.enabled,
                 onCheckedChange = onEnabledChange,
-                modifier = Modifier.testTag("monitor_${metric.prefKey}_toggle"),
+                modifier = Modifier
+                    .testTag("monitor_${metric.prefKey}_toggle")
+                    .defaultMinSize(minHeight = 48.dp, minWidth = 48.dp),
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color(0xFF0F172A),
+                    checkedThumbColor = MaterialTheme.colorScheme.surface,
                     checkedTrackColor = CyberCyan
                 )
             )
         }
 
         if (config.enabled) {
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(Spacing.xs))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
             ) {
                 MonitoringSchedule.INTERVAL_OPTIONS_MIN.forEach { minutes ->
                     val selected = config.intervalMin == minutes
@@ -1151,9 +1237,10 @@ private fun HealthMonitoringMetricRow(
                         selected = selected,
                         onClick = { onIntervalChange(minutes) },
                         label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                        modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = CyberCyan,
-                            selectedLabelColor = Color(0xFF0F172A)
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary
                         )
                     )
                 }
@@ -1161,4 +1248,3 @@ private fun HealthMonitoringMetricRow(
         }
     }
 }
-

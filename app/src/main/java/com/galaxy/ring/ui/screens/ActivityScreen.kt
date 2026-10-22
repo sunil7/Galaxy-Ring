@@ -2,12 +2,13 @@ package com.galaxy.ring.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,18 +16,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.DirectionsRun
-import androidx.compose.material.icons.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Hiking
-import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -34,6 +31,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -43,21 +41,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.galaxy.ring.GalaxyRingApp
 import com.galaxy.ring.data.WorkoutSession
+import com.galaxy.ring.ui.components.EmptyState
+import com.galaxy.ring.ui.components.MetricCard
+import com.galaxy.ring.ui.components.SectionHeader
 import com.galaxy.ring.ui.theme.ActivityGreen
 import com.galaxy.ring.ui.theme.AmberGlow
 import com.galaxy.ring.ui.theme.CyberCyan
-import com.galaxy.ring.ui.theme.DarkCardBorder
-import com.galaxy.ring.ui.theme.DarkSurface
-import com.galaxy.ring.ui.theme.DarkSurfaceVariant
 import com.galaxy.ring.ui.theme.ElectricViolet
 import com.galaxy.ring.ui.theme.RosePulse
-import com.galaxy.ring.ui.theme.SectionHeader
+import com.galaxy.ring.ui.theme.ShapeMedium
+import com.galaxy.ring.ui.theme.ShapeSmall
+import com.galaxy.ring.ui.theme.Spacing
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -88,22 +88,23 @@ fun ActivityScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
-        item { Spacer(modifier = Modifier.height(8.dp)) }
+        item { Spacer(modifier = Modifier.height(Spacing.xs)) }
 
         // Date Selector Bar
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                shape = ShapeMedium,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -111,7 +112,8 @@ fun ActivityScreen(
                         onClick = {
                             val prev = (selectedCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -1) }
                             selectedCalendar = prev
-                        }
+                        },
+                        modifier = Modifier.size(48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -122,7 +124,7 @@ fun ActivityScreen(
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
                     ) {
                         Icon(
                             imageVector = Icons.Default.CalendarMonth,
@@ -142,7 +144,8 @@ fun ActivityScreen(
                         onClick = {
                             val next = (selectedCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, 1) }
                             selectedCalendar = next
-                        }
+                        },
+                        modifier = Modifier.size(48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
@@ -154,9 +157,35 @@ fun ActivityScreen(
             }
         }
 
-        // Daily Steps Summary Card (kept separate from activity workouts)
+        // Daily Steps Summary: MetricCard
         item {
-            HistoryStepsCard(steps = daySteps)
+            val stepsValue = if (daySteps != null) {
+                NumberFormat.getIntegerInstance().format(daySteps!!.steps)
+            } else {
+                "—"
+            }
+            val distanceKm = (daySteps?.distanceMeters ?: 0.0) / 1000.0
+            val subtitleText = if (daySteps != null) {
+                buildString {
+                    if (distanceKm > 0.05) append(String.format(Locale.US, "%.2f km", distanceKm))
+                    if (daySteps!!.caloriesKcal > 0) {
+                        if (isNotEmpty()) append(" • ")
+                        append("${daySteps!!.caloriesKcal} kcal")
+                    }
+                }.ifEmpty { "Daily total recorded by ring" }
+            } else {
+                "No steps data recorded for this day"
+            }
+
+            MetricCard(
+                title = "Steps",
+                value = stepsValue,
+                unit = if (daySteps != null) "steps" else "",
+                subtitle = subtitleText,
+                icon = Icons.AutoMirrored.Filled.DirectionsWalk,
+                accentColor = ActivityGreen,
+                testTag = "activity_steps_card"
+            )
         }
 
         // Workouts Header
@@ -185,7 +214,7 @@ fun ActivityScreen(
             }
         }
 
-        item { Spacer(modifier = Modifier.height(32.dp)) }
+        item { Spacer(modifier = Modifier.height(Spacing.lg)) }
     }
 }
 
@@ -199,62 +228,19 @@ fun WorkoutEmptyState(
     isSyncing: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant.copy(alpha = 0.35f)),
-        border = BorderStroke(1.dp, DarkCardBorder.copy(alpha = 0.4f))
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.DirectionsRun,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                modifier = Modifier.size(32.dp)
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = "No workouts on the ring for this day. Start a sport mode on the ring, then Sync.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(14.dp))
-            Button(
-                onClick = onSyncClick,
-                enabled = !isSyncing,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = CyberCyan,
-                    contentColor = Color(0xFF021B2D)
-                ),
-                shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Sync,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.size(8.dp))
-                Text(
-                    text = if (isSyncing) "Syncing..." else "Sync Now",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-    }
+    EmptyState(
+        message = "No workouts on the ring for this day. Start a sport mode on the ring, then Sync.",
+        icon = Icons.AutoMirrored.Filled.DirectionsRun,
+        actionLabel = if (isSyncing) "Syncing..." else "Sync Now",
+        onAction = onSyncClick,
+        testTag = "workout_empty_state",
+        modifier = modifier
+    )
 }
 
 /**
  * Displays a real WorkoutSession with type, time range, distance, steps, and telemetry metrics.
+ * Styled with Material 3 theme tokens and >= 48dp touch target accessibility.
  */
 @Composable
 fun WorkoutSessionCard(
@@ -264,11 +250,18 @@ fun WorkoutSessionCard(
 ) {
     val cardModifier = modifier
         .fillMaxWidth()
+        .testTag("workout_session_card")
         .then(
             if (onClick != null) {
                 Modifier
-                    .clip(RoundedCornerShape(16.dp))
-                    .clickable(onClick = onClick)
+                    .defaultMinSize(minHeight = 48.dp, minWidth = 48.dp)
+                    .clip(ShapeMedium)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = ripple(),
+                        role = Role.Button,
+                        onClick = onClick
+                    )
             } else {
                 Modifier
             }
@@ -290,22 +283,22 @@ fun WorkoutSessionCard(
     val stepsStr = if (session.totalSteps > 0) NumberFormat.getIntegerInstance().format(session.totalSteps) + " steps" else null
 
     val (icon, tintColor) = when (session.sportTypeName.lowercase()) {
-        "run", "jog" -> Icons.Default.DirectionsRun to CyberCyan
-        "walk" -> Icons.Default.DirectionsWalk to ActivityGreen
+        "run", "jog" -> Icons.AutoMirrored.Filled.DirectionsRun to CyberCyan
+        "walk" -> Icons.AutoMirrored.Filled.DirectionsWalk to ActivityGreen
         "hike" -> Icons.Default.Hiking to AmberGlow
         else -> Icons.Default.FitnessCenter to ElectricViolet
     }
 
     Card(
         modifier = cardModifier,
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        border = BorderStroke(1.dp, DarkCardBorder.copy(alpha = 0.6f))
+        shape = ShapeMedium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(Spacing.md)
         ) {
             // Header: Sport Type + Time Range + Duration Pill
             Row(
@@ -315,7 +308,7 @@ fun WorkoutSessionCard(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                 ) {
                     Surface(
                         shape = CircleShape,
@@ -347,20 +340,20 @@ fun WorkoutSessionCard(
                 }
 
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = DarkSurfaceVariant.copy(alpha = 0.5f)
+                    shape = ShapeSmall,
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                 ) {
                     Text(
                         text = durationStr,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = tintColor,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(horizontal = Spacing.xs, vertical = Spacing.xxs)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(Spacing.sm))
 
             // Metrics row: Distance, Steps, Calories, Avg HR
             Row(

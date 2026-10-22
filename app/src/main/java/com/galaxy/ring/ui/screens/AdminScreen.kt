@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -65,6 +67,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -126,6 +129,96 @@ fun AdminScreen(
         is ConnectionState.Scanning -> "Scanning"
         is ConnectionState.Error -> "Error: ${c.message}"
         is ConnectionState.Disconnected -> "Disconnected"
+    }
+
+    var showDeduplicateDialog by remember { mutableStateOf(false) }
+    var showClearHistoryDialog by remember { mutableStateOf(false) }
+
+    if (showDeduplicateDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeduplicateDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    tint = CyberCyan
+                )
+            },
+            title = {
+                Text("Deduplicate History")
+            },
+            text = {
+                Text("This operation removes duplicate readings from this app's local database only and does NOT change Health Connect data.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeduplicateDialog = false
+                        scope.launch {
+                            val (hrRemoved, spo2Removed) = app.healthRepository.deduplicateHistory()
+                            Toast.makeText(
+                                context,
+                                "Deduplicated history: removed $hrRemoved HR and $spo2Removed SpO₂ duplicate samples (within 60s)",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    },
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                ) {
+                    Text("Deduplicate")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { showDeduplicateDialog = false },
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showClearHistoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearHistoryDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.DeleteSweep,
+                    contentDescription = null,
+                    tint = RosePulse
+                )
+            },
+            title = {
+                Text("Clear Local History")
+            },
+            text = {
+                Text("Are you sure you want to clear all history? This affects this app's local database only and does NOT change Health Connect data.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showClearHistoryDialog = false
+                        scope.launch {
+                            app.healthRepository.clearAllHistory()
+                            Toast.makeText(context, "Local Room history cleared (samples removed)", Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RosePulse),
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                ) {
+                    Text("Clear Local History")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { showClearHistoryDialog = false },
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     Scaffold(
@@ -640,18 +733,12 @@ fun AdminScreen(
                             }
 
                             OutlinedButton(
-                                onClick = {
-                                    scope.launch {
-                                        val (hrRemoved, spo2Removed) = app.healthRepository.deduplicateHistory()
-                                        Toast.makeText(
-                                            context,
-                                            "Deduplicated history: removed $hrRemoved HR and $spo2Removed SpO₂ duplicate samples (within 60s)",
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                    }
-                                },
+                                onClick = { showDeduplicateDialog = true },
                                 shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyberCyan)
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyberCyan),
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("admin_deduplicate_history_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Refresh,
@@ -663,14 +750,12 @@ fun AdminScreen(
                             }
 
                             OutlinedButton(
-                                onClick = {
-                                    scope.launch {
-                                        app.healthRepository.clearAllHistory()
-                                        Toast.makeText(context, "Local Room history cleared (samples removed)", Toast.LENGTH_LONG).show()
-                                    }
-                                },
+                                onClick = { showClearHistoryDialog = true },
                                 shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = RosePulse)
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = RosePulse),
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("admin_clear_history_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.DeleteSweep,
