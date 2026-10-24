@@ -142,11 +142,36 @@ class RingHealthRepository(private val context: Context) {
             else prefs.edit().remove("stress_working_push_key").apply()
         }
 
+    // Track previous sample for spike suppression before saving to DB
+    private var lastSavedHrBpm: Int? = null
+    private var lastSavedHrTimestamp: Long = 0L
+    private var lastSavedSpo2Percentage: Float? = null
+    private var lastSavedSpo2Timestamp: Long = 0L
+
     /**
      * Saves a single Heart Rate sample to Room DB.
      * Safety net: If a sample exists within +-60s, updates that row instead of inserting a duplicate.
      */
     suspend fun saveHeartRate(bpm: Int, timestamp: Long = System.currentTimeMillis(), isManual: Boolean = false) {
+        // Range check: reject values outside 30..240 bpm. Drop or clamp, do not insert to DB.
+        if (bpm !in 30..240) {
+            AppLog.w(tag, "Rejecting out-of-range HR sample before DB save: $bpm bpm (valid bounds: 30..240)")
+            return
+        }
+        // Spike filter: drop single-sample spikes (delta > 40 bpm from previous sample when interval < 2 s)
+        val prevBpm = lastSavedHrBpm
+        val prevTime = lastSavedHrTimestamp
+        val interval = timestamp - prevTime
+        if (prevBpm != null && kotlin.math.abs(bpm - prevBpm) > 40 && interval in 0 until 2000L) {
+            AppLog.w(
+                tag,
+                "Dropping HR spike before DB save: $bpm bpm (delta: ${kotlin.math.abs(bpm - prevBpm)} > 40 from $prevBpm bpm, interval: ${interval}ms < 2000ms)"
+            )
+            return
+        }
+        lastSavedHrBpm = bpm
+        lastSavedHrTimestamp = timestamp
+
         val existing = hrDao.findSampleBetween(timestamp - 60000L, timestamp + 60000L)
         if (existing != null) {
             val updated = existing.copy(
@@ -172,6 +197,25 @@ class RingHealthRepository(private val context: Context) {
      * Safety net: If a sample exists within +-60s, updates that row instead of inserting a duplicate.
      */
     suspend fun saveOxygenSaturation(percentage: Float, timestamp: Long = System.currentTimeMillis(), isManual: Boolean = false) {
+        // Range check: reject values outside 70..100%. Drop or clamp, do not insert to DB.
+        if (percentage !in 70f..100f) {
+            AppLog.w(tag, "Rejecting out-of-range SpO2 sample before DB save: $percentage% (valid bounds: 70..100)")
+            return
+        }
+        // Spike filter: drop single-sample spikes (delta > 15% from previous sample when interval < 2 s)
+        val prevSpo2 = lastSavedSpo2Percentage
+        val prevTime = lastSavedSpo2Timestamp
+        val interval = timestamp - prevTime
+        if (prevSpo2 != null && kotlin.math.abs(percentage - prevSpo2) > 15f && interval in 0 until 2000L) {
+            AppLog.w(
+                tag,
+                "Dropping SpO2 spike before DB save: $percentage% (delta: ${kotlin.math.abs(percentage - prevSpo2)} > 15 from $prevSpo2%, interval: ${interval}ms < 2000ms)"
+            )
+            return
+        }
+        lastSavedSpo2Percentage = percentage
+        lastSavedSpo2Timestamp = timestamp
+
         val existing = spo2Dao.findSampleBetween(timestamp - 60000L, timestamp + 60000L)
         if (existing != null) {
             val updated = existing.copy(

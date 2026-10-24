@@ -170,10 +170,34 @@ class BleRepository(
         observeBLEManagerData()
     }
 
+    private var lastObservedHrBpm: Int? = null
+    private var lastObservedHrTimestamp: Long = 0L
+    private var lastObservedSpo2Percentage: Float? = null
+    private var lastObservedSpo2Timestamp: Long = 0L
+
     private fun observeBLEManagerData() {
         // 1. Observe Heart Rate (in-memory streaming only for live UI; single final row saved on completion)
         scope.launch {
             bleManager.heartRateFlow.collect { hr ->
+                // Range check: reject values outside 30..240 bpm. Drop or clamp, do not emit.
+                if (hr.bpm !in 30..240) {
+                    AppLog.w(tagSync, "Dropping out-of-range HR live sample: ${hr.bpm} BPM (valid bounds: 30..240)")
+                    return@collect
+                }
+                // Spike filter: drop single-sample spikes (delta > 40 bpm from previous sample when interval < 2 s)
+                val prevBpm = lastObservedHrBpm
+                val prevTime = lastObservedHrTimestamp
+                val interval = hr.timestamp - prevTime
+                if (prevBpm != null && kotlin.math.abs(hr.bpm - prevBpm) > 40 && interval in 0 until 2000L) {
+                    AppLog.w(
+                        tagSync,
+                        "Dropping HR live spike: ${hr.bpm} BPM (delta: ${kotlin.math.abs(hr.bpm - prevBpm)} > 40 from $prevBpm BPM, interval: ${interval}ms < 2000ms)"
+                    )
+                    return@collect
+                }
+                lastObservedHrBpm = hr.bpm
+                lastObservedHrTimestamp = hr.timestamp
+
                 AppLog.i(tagSync, "Heart Rate live sample from 0224: ${hr.bpm} BPM")
                 val updatedHistory = _snapshot.value.heartRateHistory.toMutableList().apply {
                     add(hr)
@@ -186,6 +210,25 @@ class BleRepository(
         // 2. Observe SpO₂ (in-memory streaming only for live UI; single final row saved on completion)
         scope.launch {
             bleManager.spo2Flow.collect { spo2 ->
+                // Range check: reject values outside 70..100%. Drop, do not emit.
+                if (spo2.percentage !in 70f..100f) {
+                    AppLog.w(tagSync, "Dropping out-of-range SpO2 live sample: ${spo2.percentage}% (valid bounds: 70..100)")
+                    return@collect
+                }
+                // Spike filter: drop single-sample spikes (delta > 15% from previous sample when interval < 2 s)
+                val prevSpo2 = lastObservedSpo2Percentage
+                val prevTime = lastObservedSpo2Timestamp
+                val interval = spo2.timestamp - prevTime
+                if (prevSpo2 != null && kotlin.math.abs(spo2.percentage - prevSpo2) > 15f && interval in 0 until 2000L) {
+                    AppLog.w(
+                        tagSync,
+                        "Dropping SpO2 live spike: ${spo2.percentage}% (delta: ${kotlin.math.abs(spo2.percentage - prevSpo2)} > 15 from $prevSpo2%, interval: ${interval}ms < 2000ms)"
+                    )
+                    return@collect
+                }
+                lastObservedSpo2Percentage = spo2.percentage
+                lastObservedSpo2Timestamp = spo2.timestamp
+
                 AppLog.i(tagSync, "SpO₂ live sample from 024E: ${spo2.percentage}%")
                 val updatedHistory = _snapshot.value.oxygenSaturationHistory.toMutableList().apply {
                     add(spo2)
@@ -575,7 +618,7 @@ class BleRepository(
             for (step in 1..totalSteps) {
                 delay(pollStepMs)
                 val current = _snapshot.value.latestHeartRate
-                if (current != null && current.timestamp >= startTime && current.bpm in 30..220) {
+                if (current != null && current.timestamp >= startTime && current.bpm in 30..240) {
                     latestNonzeroHr = current
                 }
                 if (statusCompleteReceived || !bleManager.isMeasuringActive) {
@@ -601,11 +644,11 @@ class BleRepository(
 
             // Final check on latest reading
             val finalCurrent = _snapshot.value.latestHeartRate
-            if (finalCurrent != null && finalCurrent.timestamp >= startTime && finalCurrent.bpm in 30..220) {
+            if (finalCurrent != null && finalCurrent.timestamp >= startTime && finalCurrent.bpm in 30..240) {
                 latestNonzeroHr = finalCurrent
             }
 
-            if (latestNonzeroHr != null) {
+            if (latestNonzeroHr != null && latestNonzeroHr.bpm in 30..240) {
                 // Save single final sample to Room and Health Connect
                 healthRepository.saveHeartRate(bpm = latestNonzeroHr.bpm, timestamp = latestNonzeroHr.timestamp, isManual = isManual)
                 healthWriter.writeHeartRateSample(latestNonzeroHr, isManual = isManual)
@@ -734,7 +777,7 @@ class BleRepository(
                 latestNonzeroSpo2 = finalCurrent
             }
 
-            if (latestNonzeroSpo2 != null) {
+            if (latestNonzeroSpo2 != null && latestNonzeroSpo2.percentage in 70f..100f) {
                 // Save single final sample to Room and Health Connect
                 healthRepository.saveOxygenSaturation(percentage = latestNonzeroSpo2.percentage, timestamp = latestNonzeroSpo2.timestamp, isManual = isManual)
                 healthWriter.writeOxygenSaturationSample(latestNonzeroSpo2, isManual = isManual)

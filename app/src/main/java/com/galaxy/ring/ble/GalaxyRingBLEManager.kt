@@ -149,6 +149,14 @@ class GalaxyRingBLEManager(
     private val _workoutFlow = MutableSharedFlow<List<WorkoutSession>>(extraBufferCapacity = 16)
     val workoutFlow: SharedFlow<List<WorkoutSession>> = _workoutFlow.asSharedFlow()
 
+    // Heart rate tracking for range and spike filtering (30..240 bpm, spike delta > 40 when interval < 2s)
+    private var lastValidHrBpm: Int? = null
+    private var lastValidHrTimestamp: Long = 0L
+
+    // SpO2 tracking for range and spike filtering (70..100%, spike delta > 15% when interval < 2s)
+    private var lastValidSpo2Percentage: Float? = null
+    private var lastValidSpo2Timestamp: Long = 0L
+
     /**
      * Resets session telemetry counters when a new device connection is established.
      */
@@ -162,6 +170,10 @@ class GalaxyRingBLEManager(
         lastRxBytesCount = 0
         isMeasuringActive = false
         activeMeasureType = null
+        lastValidHrBpm = null
+        lastValidHrTimestamp = 0L
+        lastValidSpo2Percentage = null
+        lastValidSpo2Timestamp = 0L
         _initState.value = InitState.Idle
 
         servicesConfigured = false
@@ -516,12 +528,48 @@ class GalaxyRingBLEManager(
             try {
                 val (hr, spo2) = Protocol.parseBiometricFrame(frame)
                 if (hr != null) {
-                    AppLog.i(tag, "HR sample parsed: ${hr.bpm} BPM from 0224")
-                    _heartRateFlow.emit(hr)
+                    // Range check: reject values outside 30..240 bpm. Drop or clamp, do not emit.
+                    if (hr.bpm !in 30..240) {
+                        AppLog.w(tag, "Dropping out-of-range HR sample: ${hr.bpm} BPM (valid bounds: 30..240)")
+                    } else {
+                        // Spike filter: drop single-sample spikes (delta > 40 bpm from previous sample when interval < 2 s)
+                        val prevBpm = lastValidHrBpm
+                        val prevTime = lastValidHrTimestamp
+                        val interval = hr.timestamp - prevTime
+                        if (prevBpm != null && kotlin.math.abs(hr.bpm - prevBpm) > 40 && interval in 0 until 2000L) {
+                            AppLog.w(
+                                tag,
+                                "Dropping HR spike: ${hr.bpm} BPM (delta: ${kotlin.math.abs(hr.bpm - prevBpm)} > 40 from $prevBpm BPM, interval: ${interval}ms < 2000ms)"
+                            )
+                        } else {
+                            lastValidHrBpm = hr.bpm
+                            lastValidHrTimestamp = hr.timestamp
+                            AppLog.i(tag, "HR sample parsed: ${hr.bpm} BPM from 0224")
+                            _heartRateFlow.emit(hr)
+                        }
+                    }
                 }
                 if (spo2 != null) {
-                    AppLog.i(tag, "SpO2 sample parsed: ${spo2.percentage.toInt()}% from 024E")
-                    _spo2Flow.emit(spo2)
+                    // Range check: reject values outside 70..100%. Drop or clamp, do not emit.
+                    if (spo2.percentage !in 70f..100f) {
+                        AppLog.w(tag, "Dropping out-of-range SpO2 sample: ${spo2.percentage}% (valid bounds: 70..100)")
+                    } else {
+                        // Spike filter: drop single-sample spikes (delta > 15% from previous sample when interval < 2 s)
+                        val prevSpo2 = lastValidSpo2Percentage
+                        val prevTime = lastValidSpo2Timestamp
+                        val interval = spo2.timestamp - prevTime
+                        if (prevSpo2 != null && kotlin.math.abs(spo2.percentage - prevSpo2) > 15f && interval in 0 until 2000L) {
+                            AppLog.w(
+                                tag,
+                                "Dropping SpO2 spike: ${spo2.percentage}% (delta: ${kotlin.math.abs(spo2.percentage - prevSpo2)} > 15 from $prevSpo2%, interval: ${interval}ms < 2000ms)"
+                            )
+                        } else {
+                            lastValidSpo2Percentage = spo2.percentage
+                            lastValidSpo2Timestamp = spo2.timestamp
+                            AppLog.i(tag, "SpO2 sample parsed: ${spo2.percentage.toInt()}% from 024E")
+                            _spo2Flow.emit(spo2)
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 AppLog.e(tag, "Error handling biometric frame: ${e.message}", e)

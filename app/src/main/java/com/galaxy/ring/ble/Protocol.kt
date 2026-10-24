@@ -638,7 +638,7 @@ object Protocol {
      *   value = data[4] (the byte immediately after the 4-byte timestamp)
      *
      * Value ranges:
-     *   HR (0x0224): 30..220 BPM (value 0 ignored)
+     *   HR (0x0224): 30..240 BPM (value 0 ignored)
      *   SpO2 (0x024E): 70..100% (value 0 ignored)
      */
     fun parseBiometricFrame(frame: Frame): Pair<HeartRateSample?, OxygenSaturationSample?> {
@@ -669,7 +669,7 @@ object Protocol {
             }
 
             if (key == KEY_HR_PUSH) {
-                if (value in 30..220) {
+                if (value in 30..240) {
                     latestHr = HeartRateSample(bpm = value, confidence = 100, timestamp = now)
                 }
             } else if (key == KEY_SPO2_PUSH) {
