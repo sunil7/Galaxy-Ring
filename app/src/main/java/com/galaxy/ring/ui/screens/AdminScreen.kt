@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -104,6 +105,8 @@ fun AdminScreen(
     val allTxRecords by AppLog.txFlow.collectAsState()
 
     var selectedFilter by remember { mutableStateOf("All") } // "All", "BLE", "Sync", "Error"
+    var showClearHistoryDialog by remember { mutableStateOf(false) }
+    var showDeduplicateDialog by remember { mutableStateOf(false) }
 
     val filteredLogs = remember(allLogs, selectedFilter) {
         val list = when (selectedFilter) {
@@ -126,6 +129,100 @@ fun AdminScreen(
         is ConnectionState.Scanning -> "Scanning"
         is ConnectionState.Error -> "Error: ${c.message}"
         is ConnectionState.Disconnected -> "Disconnected"
+    }
+
+    if (showDeduplicateDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeduplicateDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    tint = CyberCyan
+                )
+            },
+            title = {
+                Text(
+                    text = "Deduplicate History",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "This action removes duplicate samples within 60 seconds from this app's local database only and does NOT change Health Connect data.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeduplicateDialog = false
+                        scope.launch {
+                            val (hrRemoved, spo2Removed) = app.healthRepository.deduplicateHistory()
+                            Toast.makeText(
+                                context,
+                                "Deduplicated local history: removed $hrRemoved HR and $spo2Removed SpO₂ duplicate samples",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                ) {
+                    Text("Deduplicate", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showDeduplicateDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showClearHistoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearHistoryDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.DeleteSweep,
+                    contentDescription = null,
+                    tint = RosePulse
+                )
+            },
+            title = {
+                Text(
+                    text = "Clear Local History",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "This action removes all recorded samples from this app's local database only and does NOT change Health Connect data.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showClearHistoryDialog = false
+                        scope.launch {
+                            app.healthRepository.clearAllHistory()
+                            Toast.makeText(context, "Local Room database history cleared", Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RosePulse)
+                ) {
+                    Text("Clear Local History", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showClearHistoryDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     Scaffold(
@@ -641,14 +738,7 @@ fun AdminScreen(
 
                             OutlinedButton(
                                 onClick = {
-                                    scope.launch {
-                                        val (hrRemoved, spo2Removed) = app.healthRepository.deduplicateHistory()
-                                        Toast.makeText(
-                                            context,
-                                            "Deduplicated history: removed $hrRemoved HR and $spo2Removed SpO₂ duplicate samples (within 60s)",
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                    }
+                                    showDeduplicateDialog = true
                                 },
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = CyberCyan)
@@ -664,10 +754,7 @@ fun AdminScreen(
 
                             OutlinedButton(
                                 onClick = {
-                                    scope.launch {
-                                        app.healthRepository.clearAllHistory()
-                                        Toast.makeText(context, "Local Room history cleared (samples removed)", Toast.LENGTH_LONG).show()
-                                    }
+                                    showClearHistoryDialog = true
                                 },
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = RosePulse)

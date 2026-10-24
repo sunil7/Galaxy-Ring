@@ -121,7 +121,7 @@ fun PermissionsRationaleContent(
                 RationaleCard(
                     icon = Icons.Default.Favorite,
                     title = "Heart Rate & Vitals",
-                    description = "Stores continuous pulse and resting heart rate captured by ring optical sensors."
+                    description = "Stores continuous pulse and heart rate captured by ring optical sensors."
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -154,7 +154,7 @@ fun PermissionsRationaleContent(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Your health data remains encrypted on your device and is never shared without your permission.",
+                    text = "Your health data is stored on this device. Health Connect controls what other apps can read.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     textAlign = TextAlign.Center,
