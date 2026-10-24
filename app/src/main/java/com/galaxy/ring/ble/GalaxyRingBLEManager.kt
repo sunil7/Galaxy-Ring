@@ -1116,6 +1116,56 @@ class GalaxyRingBLEManager(
     }
 
     /**
+     * Queries Heart Rate history over BLE using key 0x0503 (KEY_HISTORY_HR, flag 0x10 READ).
+     * Returns parsed real samples (~6B: Y2K timestamp + 1-byte BPM in 30..240), or empty list if no data (no fakes).
+     */
+    suspend fun fetchHeartRateHistory(gatt: BluetoothGatt): List<Protocol.HistorySample> {
+        val frame = Protocol.buildHistoryRead(Protocol.KEY_HISTORY_HR)
+        val txHex = frame.joinToString(" ") { "%02X".format(it) }
+        AppLog.i(tag, "TX -> 0x0503 HR History Query: $txHex")
+        val reply = executeCommand(gatt, frame, Protocol.KEY_HISTORY_HR, timeoutMs = 5000L)
+        return if (reply != null) {
+            val rxHex = reply.fullPayload.joinToString(" ") { "%02X".format(it) }
+            AppLog.i(tag, "0x0503 HR History RX: $rxHex")
+            val samples = Protocol.parseHistorySamples(reply, minVal = 30, maxVal = 240)
+            if (samples.isNotEmpty()) {
+                AppLog.i(tag, "Parsed ${samples.size} real HR history sample(s) from 0x0503")
+            } else {
+                AppLog.i(tag, "0x0503 HR History reply was empty or contained no valid samples: $rxHex")
+            }
+            samples
+        } else {
+            AppLog.i(tag, "0x0503 HR History query timed out (0 matching RX)")
+            emptyList()
+        }
+    }
+
+    /**
+     * Queries SpO2 history over BLE using key 0x0509 (KEY_HISTORY_SPO2, flag 0x10 READ).
+     * Returns parsed real samples (~6B: Y2K timestamp + 1-byte percentage in 70..100), or empty list if no data (no fakes).
+     */
+    suspend fun fetchSpo2History(gatt: BluetoothGatt): List<Protocol.HistorySample> {
+        val frame = Protocol.buildHistoryRead(Protocol.KEY_HISTORY_SPO2)
+        val txHex = frame.joinToString(" ") { "%02X".format(it) }
+        AppLog.i(tag, "TX -> 0x0509 SpO2 History Query: $txHex")
+        val reply = executeCommand(gatt, frame, Protocol.KEY_HISTORY_SPO2, timeoutMs = 5000L)
+        return if (reply != null) {
+            val rxHex = reply.fullPayload.joinToString(" ") { "%02X".format(it) }
+            AppLog.i(tag, "0x0509 SpO2 History RX: $rxHex")
+            val samples = Protocol.parseHistorySamples(reply, minVal = 70, maxVal = 100)
+            if (samples.isNotEmpty()) {
+                AppLog.i(tag, "Parsed ${samples.size} real SpO2 history sample(s) from 0x0509")
+            } else {
+                AppLog.i(tag, "0x0509 SpO2 History reply was empty or contained no valid samples: $rxHex")
+            }
+            samples
+        } else {
+            AppLog.i(tag, "0x0509 SpO2 History query timed out (0 matching RX)")
+            emptyList()
+        }
+    }
+
+    /**
      * Queries HRV history over BLE using key 0x050A (KEY_HISTORY_HRV, flag 0x10).
      * Returns parsed real samples (~6B: Y2K timestamp + 1-byte value), or empty list if no data (no fakes).
      */

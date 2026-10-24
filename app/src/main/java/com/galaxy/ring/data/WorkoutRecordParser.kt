@@ -73,7 +73,7 @@ object WorkoutRecordParser {
             if (f.size != 3) return@mapNotNull null
             val off = f[0].toLongOrNull() ?: return@mapNotNull null
             val ts = f[1].toLongOrNull() ?: return@mapNotNull null
-            val bpm = f[2].toIntOrNull() ?: return@mapNotNull null
+            val bpm = f[2].toIntOrNull()?.takeIf { it in 30..240 } ?: return@mapNotNull null
             SportHrPoint(off, ts, bpm)
         }
     }
@@ -226,7 +226,7 @@ object WorkoutRecordParser {
             val hrAvg = data[currentIdx].toInt() and 0xFF
             val hrMin = data[currentIdx + 1].toInt() and 0xFF
             val hrMax = data[currentIdx + 2].toInt() and 0xFF
-            if (hrAvg in 30..220 && hrMin in 30..220 && hrMax in 30..220) {
+            if (hrAvg in 30..240 && hrMin in 30..240 && hrMax in 30..240) {
                 avgHr = hrAvg
                 minHr = hrMin
                 maxHr = hrMax
@@ -293,17 +293,27 @@ object WorkoutRecordParser {
             if (hrCount in 1..250 && currentIdx + 1 + hrCount <= data.size) {
                 currentIdx += 1
                 val intervalSec = if (durationSec > 0 && hrCount > 0) durationSec / hrCount else 60L
+                var lastValidBpm: Int? = null
+                var lastValidOffsetSec: Long = 0L
                 for (i in 0 until hrCount) {
                     val bpm = data[currentIdx + i].toInt() and 0xFF
-                    if (bpm in 30..220) {
+                    if (bpm in 30..240) {
                         val offsetSec = i * intervalSec
-                        hrPoints.add(
-                            SportHrPoint(
-                                offsetSeconds = offsetSec,
-                                timestamp = startTime + offsetSec * 1000L,
-                                bpm = bpm
+                        val deltaSec = offsetSec - lastValidOffsetSec
+                        val prevBpm = lastValidBpm
+                        if (prevBpm != null && kotlin.math.abs(bpm - prevBpm) > 40 && deltaSec in 0 until 2L) {
+                            AppLog.w(TAG, "Dropping workout HR spike: $bpm bpm (prev: $prevBpm, interval: ${deltaSec}s)")
+                        } else {
+                            lastValidBpm = bpm
+                            lastValidOffsetSec = offsetSec
+                            hrPoints.add(
+                                SportHrPoint(
+                                    offsetSeconds = offsetSec,
+                                    timestamp = startTime + offsetSec * 1000L,
+                                    bpm = bpm
+                                )
                             )
-                        )
+                        }
                     }
                 }
                 currentIdx += hrCount

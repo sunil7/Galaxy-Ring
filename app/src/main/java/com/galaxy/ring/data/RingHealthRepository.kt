@@ -147,6 +147,10 @@ class RingHealthRepository(private val context: Context) {
     private var lastSavedHrTimestamp: Long = 0L
     private var lastSavedSpo2Percentage: Float? = null
     private var lastSavedSpo2Timestamp: Long = 0L
+    private var lastSavedHrvMs: Int? = null
+    private var lastSavedHrvTimestamp: Long = 0L
+    private var lastSavedStressScore: Int? = null
+    private var lastSavedStressTimestamp: Long = 0L
 
     /**
      * Saves a single Heart Rate sample to Room DB.
@@ -241,6 +245,25 @@ class RingHealthRepository(private val context: Context) {
      * Safety net: If a sample exists within +-60s, updates that row instead of inserting a duplicate.
      */
     suspend fun saveHrv(hrvMs: Int, timestamp: Long = System.currentTimeMillis(), isManual: Boolean = false) {
+        // Range check: reject values outside 5..250 ms. Drop or clamp, do not insert to DB.
+        if (hrvMs !in 5..250) {
+            AppLog.w(tag, "Rejecting out-of-range HRV sample before DB save: $hrvMs ms (valid bounds: 5..250)")
+            return
+        }
+        // Spike filter: drop single-sample spikes (delta > 50 ms from previous sample when interval < 2 s)
+        val prevHrv = lastSavedHrvMs
+        val prevTime = lastSavedHrvTimestamp
+        val interval = timestamp - prevTime
+        if (prevHrv != null && kotlin.math.abs(hrvMs - prevHrv) > 50 && interval in 0 until 2000L) {
+            AppLog.w(
+                tag,
+                "Dropping HRV spike before DB save: $hrvMs ms (delta: ${kotlin.math.abs(hrvMs - prevHrv)} > 50 from $prevHrv ms, interval: ${interval}ms < 2000ms)"
+            )
+            return
+        }
+        lastSavedHrvMs = hrvMs
+        lastSavedHrvTimestamp = timestamp
+
         val existing = hrvDao.findSampleBetween(timestamp - 60000L, timestamp + 60000L)
         if (existing != null) {
             val updated = existing.copy(
@@ -262,10 +285,29 @@ class RingHealthRepository(private val context: Context) {
     }
 
     /**
-     * Saves a single Stress score sample (0..100) to Room DB.
+     * Saves a single Stress score sample (1..100) to Room DB.
      * Safety net: If a sample exists within +-60s, updates that row instead of inserting a duplicate.
      */
     suspend fun saveStress(stressScore: Int, timestamp: Long = System.currentTimeMillis(), isManual: Boolean = false) {
+        // Range check: reject values outside 1..100. Drop or clamp, do not insert to DB.
+        if (stressScore !in 1..100) {
+            AppLog.w(tag, "Rejecting out-of-range Stress sample before DB save: $stressScore (valid bounds: 1..100)")
+            return
+        }
+        // Spike filter: drop single-sample spikes (delta > 30 from previous sample when interval < 2 s)
+        val prevStress = lastSavedStressScore
+        val prevTime = lastSavedStressTimestamp
+        val interval = timestamp - prevTime
+        if (prevStress != null && kotlin.math.abs(stressScore - prevStress) > 30 && interval in 0 until 2000L) {
+            AppLog.w(
+                tag,
+                "Dropping Stress spike before DB save: $stressScore (delta: ${kotlin.math.abs(stressScore - prevStress)} > 30 from $prevStress, interval: ${interval}ms < 2000ms)"
+            )
+            return
+        }
+        lastSavedStressScore = stressScore
+        lastSavedStressTimestamp = timestamp
+
         val existing = stressDao.findSampleBetween(timestamp - 60000L, timestamp + 60000L)
         if (existing != null) {
             val updated = existing.copy(

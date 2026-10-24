@@ -23,6 +23,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.TrendingDown
+import androidx.compose.material.icons.automirrored.filled.TrendingFlat
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Check
@@ -34,8 +37,6 @@ import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Timeline
-import androidx.compose.material.icons.filled.TrendingDown
-import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -803,21 +804,25 @@ fun OvernightVitalsCard(
             ) {
                 MetricPill(
                     label = "Min HR",
-                    value = "${analysis.overnightMinHr ?: 54}",
-                    unit = "BPM",
+                    value = analysis.overnightMinHr?.let { "$it" } ?: "—",
+                    unit = if (analysis.overnightMinHr != null) "BPM" else "",
                     color = NeonEmerald
                 )
                 MetricPill(
                     label = "Avg HR",
-                    value = "${analysis.overnightAvgHr ?: 62}",
-                    unit = "BPM",
+                    value = analysis.overnightAvgHr?.let { "$it" } ?: "—",
+                    unit = if (analysis.overnightAvgHr != null) "BPM" else "",
                     color = CyberCyan
                 )
                 MetricPill(
                     label = "Lowest SpO₂",
-                    value = "${analysis.overnightMinSpo2?.toInt() ?: 96}",
-                    unit = "%",
-                    color = if ((analysis.overnightMinSpo2 ?: 96f) < 90f) RosePulse else ElectricViolet
+                    value = analysis.overnightMinSpo2?.let { "${it.toInt()}" } ?: "—",
+                    unit = if (analysis.overnightMinSpo2 != null) "%" else "",
+                    color = when {
+                        analysis.overnightMinSpo2 == null -> ElectricViolet
+                        analysis.overnightMinSpo2 < 90f -> RosePulse
+                        else -> ElectricViolet
+                    }
                 )
             }
         }
@@ -931,9 +936,13 @@ fun OvernightBreathingIndicatorsCard(
                 ) {
                     MetricPill(
                         label = "Lowest SpO₂",
-                        value = "${report.lowestSpo2?.toInt() ?: 95}",
-                        unit = "%",
-                        color = if ((report.lowestSpo2 ?: 95f) < 90f) RosePulse else CyberCyan
+                        value = report.lowestSpo2?.let { "${it.toInt()}" } ?: "—",
+                        unit = if (report.lowestSpo2 != null) "%" else "",
+                        color = when {
+                            report.lowestSpo2 == null -> CyberCyan
+                            report.lowestSpo2 < 90f -> RosePulse
+                            else -> CyberCyan
+                        }
                     )
                     MetricPill(
                         label = "Desat Dips (≥3%)",
@@ -2122,18 +2131,35 @@ fun SleepComparisonCard(analysis: com.galaxy.ring.data.SleepAnalysis) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val deltaScore = analysis.deltaPreviousNightScore ?: 3
-                    val icon = if (deltaScore >= 0) Icons.Default.TrendingUp else Icons.Default.TrendingDown
-                    val iconTint = if (deltaScore >= 0) NeonEmerald else RosePulse
+                val deltaScore = analysis.deltaPreviousNightScore
+                val icon = when {
+                    deltaScore == null || deltaScore == 0 -> Icons.AutoMirrored.Filled.TrendingFlat
+                    deltaScore > 0 -> Icons.AutoMirrored.Filled.TrendingUp
+                    else -> Icons.AutoMirrored.Filled.TrendingDown
+                }
+                val iconTint = when {
+                    deltaScore == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                    deltaScore >= 0 -> NeonEmerald
+                    else -> RosePulse
+                }
+                val textScoreColor = when {
+                    deltaScore == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                    deltaScore >= 0 -> NeonEmerald
+                    else -> RosePulse
+                }
 
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(imageVector = icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(text = "vs. Previous Night", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
                 }
 
-                val scoreStr = if ((analysis.deltaPreviousNightScore ?: 3) >= 0) "+${analysis.deltaPreviousNightScore ?: 3} pts" else "${analysis.deltaPreviousNightScore ?: 3} pts"
-                Text(text = scoreStr, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = NeonEmerald)
+                val scoreStr = when {
+                    deltaScore == null -> "—"
+                    deltaScore > 0 -> "+$deltaScore pts"
+                    else -> "$deltaScore pts"
+                }
+                Text(text = scoreStr, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = textScoreColor)
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -2144,18 +2170,35 @@ fun SleepComparisonCard(analysis: com.galaxy.ring.data.SleepAnalysis) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val delta7 = analysis.deltaSevenDayAvgScore ?: 2
-                    val icon = if (delta7 >= 0) Icons.Default.TrendingUp else Icons.Default.TrendingDown
-                    val iconTint = if (delta7 >= 0) NeonEmerald else RosePulse
+                val delta7 = analysis.deltaSevenDayAvgScore
+                val icon = when {
+                    delta7 == null || delta7 == 0 -> Icons.AutoMirrored.Filled.TrendingFlat
+                    delta7 > 0 -> Icons.AutoMirrored.Filled.TrendingUp
+                    else -> Icons.AutoMirrored.Filled.TrendingDown
+                }
+                val iconTint = when {
+                    delta7 == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                    delta7 >= 0 -> NeonEmerald
+                    else -> RosePulse
+                }
+                val textAvgColor = when {
+                    delta7 == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                    delta7 >= 0 -> CyberCyan
+                    else -> RosePulse
+                }
 
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(imageVector = icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(text = "vs. 7-Day Average", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
                 }
 
-                val avgStr = if ((analysis.deltaSevenDayAvgScore ?: 2) >= 0) "+${analysis.deltaSevenDayAvgScore ?: 2} pts" else "${analysis.deltaSevenDayAvgScore ?: 2} pts"
-                Text(text = avgStr, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = CyberCyan)
+                val avgStr = when {
+                    delta7 == null -> "—"
+                    delta7 > 0 -> "+$delta7 pts"
+                    else -> "$delta7 pts"
+                }
+                Text(text = avgStr, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = textAvgColor)
             }
         }
     }

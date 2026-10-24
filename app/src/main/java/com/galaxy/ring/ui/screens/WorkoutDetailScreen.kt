@@ -1,5 +1,6 @@
 package com.galaxy.ring.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -95,6 +96,8 @@ fun WorkoutDetailScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    BackHandler { onBack() }
+
     val context = LocalContext.current
     val settings = remember { MonitoringSettings(context) }
     var useMiles by remember { mutableStateOf(settings.useMiles) }

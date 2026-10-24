@@ -935,7 +935,7 @@ class BleRepository(
                 if (finalHrvSample != null) break
             }
 
-            if (finalHrvSample != null && successfulType != null) {
+            if (finalHrvSample != null && successfulType != null && finalHrvSample.hrvMs in 5..250) {
                 healthRepository.hrvWorkingType = successfulType
                 if (successfulPushKey != null) {
                     healthRepository.hrvWorkingPushKey = successfulPushKey
@@ -1095,7 +1095,7 @@ class BleRepository(
                 if (finalStressSample != null) break
             }
 
-            if (finalStressSample != null && successfulType != null) {
+            if (finalStressSample != null && successfulType != null && finalStressSample.score in 1..100) {
                 healthRepository.stressWorkingType = successfulType
                 if (successfulPushKey != null) {
                     healthRepository.stressWorkingPushKey = successfulPushKey
@@ -1393,9 +1393,59 @@ class BleRepository(
                 return SyncResult(success = false, steps = stepsCount, hasSleep = sleepSession != null, sleepMinutes = sleepSession?.durationMinutes ?: 0L, message = "Ring disconnected mid-sync", hcStatus = "Disconnected")
             }
 
-            // C) HRV history query (0x050A)
+            // C) Heart Rate history query (0x0503)
+            _syncProgressMessage.value = "Syncing heart rate (0x0503)..."
+            AppLog.i(tagSync, "C) Requesting HR history from ring (0x0503)...")
+            val hrSamples = bleManager.fetchHeartRateHistory(gatt)
+            if (hrSamples.isNotEmpty()) {
+                for (sample in hrSamples) {
+                    healthRepository.saveHeartRate(bpm = sample.value, timestamp = sample.timestamp, isManual = false)
+                }
+                val latestHrSample = hrSamples.maxByOrNull { it.timestamp }?.let { HeartRateSample(bpm = it.value, confidence = 100, timestamp = it.timestamp) }
+                if (latestHrSample != null) {
+                    _snapshot.value = _snapshot.value.copy(latestHeartRate = latestHrSample)
+                }
+                AppLog.i(tagSync, "Heart rate sync completed: saved ${hrSamples.size} sample(s) to Room")
+            } else {
+                AppLog.i(tagSync, "No HR history data returned from 0x0503; leaving HR records unchanged")
+            }
+
+            delay(200)
+
+            // Cancel if disconnected
+            if (currentGatt == null || _connectionState.value is ConnectionState.Disconnected) {
+                AppLog.w(tagSync, "Ring disconnected during HR sync. Aborting remaining sync.")
+                return SyncResult(success = false, steps = stepsCount, hasSleep = sleepSession != null, sleepMinutes = sleepSession?.durationMinutes ?: 0L, message = "Ring disconnected mid-sync", hcStatus = "Disconnected")
+            }
+
+            // D) SpO2 history query (0x0509)
+            _syncProgressMessage.value = "Syncing SpO2 (0x0509)..."
+            AppLog.i(tagSync, "D) Requesting SpO2 history from ring (0x0509)...")
+            val spo2Samples = bleManager.fetchSpo2History(gatt)
+            if (spo2Samples.isNotEmpty()) {
+                for (sample in spo2Samples) {
+                    healthRepository.saveOxygenSaturation(percentage = sample.value.toFloat(), timestamp = sample.timestamp, isManual = false)
+                }
+                val latestSpo2Sample = spo2Samples.maxByOrNull { it.timestamp }?.let { OxygenSaturationSample(percentage = it.value.toFloat(), timestamp = it.timestamp) }
+                if (latestSpo2Sample != null) {
+                    _snapshot.value = _snapshot.value.copy(latestOxygenSaturation = latestSpo2Sample)
+                }
+                AppLog.i(tagSync, "SpO2 sync completed: saved ${spo2Samples.size} sample(s) to Room")
+            } else {
+                AppLog.i(tagSync, "No SpO2 history data returned from 0x0509; leaving SpO2 records unchanged")
+            }
+
+            delay(200)
+
+            // Cancel if disconnected
+            if (currentGatt == null || _connectionState.value is ConnectionState.Disconnected) {
+                AppLog.w(tagSync, "Ring disconnected during SpO2 sync. Aborting remaining sync.")
+                return SyncResult(success = false, steps = stepsCount, hasSleep = sleepSession != null, sleepMinutes = sleepSession?.durationMinutes ?: 0L, message = "Ring disconnected mid-sync", hcStatus = "Disconnected")
+            }
+
+            // E) HRV history query (0x050A)
             _syncProgressMessage.value = "Syncing HRV (0x050A)..."
-            AppLog.i(tagSync, "C) Requesting HRV history from ring (0x050A)...")
+            AppLog.i(tagSync, "E) Requesting HRV history from ring (0x050A)...")
             val hrvSamples = bleManager.fetchHrvHistory(gatt)
             if (hrvSamples.isNotEmpty()) {
                 for (sample in hrvSamples) {
@@ -1418,9 +1468,9 @@ class BleRepository(
                 return SyncResult(success = false, steps = stepsCount, hasSleep = sleepSession != null, sleepMinutes = sleepSession?.durationMinutes ?: 0L, message = "Ring disconnected mid-sync", hcStatus = "Disconnected")
             }
 
-            // D) Stress history query (0x050D)
+            // F) Stress history query (0x050D)
             _syncProgressMessage.value = "Syncing stress (0x050D)..."
-            AppLog.i(tagSync, "D) Requesting stress history from ring (0x050D)...")
+            AppLog.i(tagSync, "F) Requesting stress history from ring (0x050D)...")
             val stressSamples = bleManager.fetchStressHistory(gatt)
             if (stressSamples.isNotEmpty()) {
                 for (sample in stressSamples) {
@@ -1443,9 +1493,9 @@ class BleRepository(
                 return SyncResult(success = false, steps = stepsCount, hasSleep = sleepSession != null, sleepMinutes = sleepSession?.durationMinutes ?: 0L, message = "Ring disconnected mid-sync", hcStatus = "Disconnected")
             }
 
-            // E) Workout history query (0x0506)
+            // G) Workout history query (0x0506)
             _syncProgressMessage.value = "Syncing workouts (0x0506)..."
-            AppLog.i(tagSync, "E) Requesting workout history from ring (0x0506)...")
+            AppLog.i(tagSync, "G) Requesting workout history from ring (0x0506)...")
             val workoutSessions = bleManager.fetchWorkoutHistory(gatt)
             if (workoutSessions.isNotEmpty()) {
                 healthRepository.saveWorkoutSessions(workoutSessions)
@@ -1456,7 +1506,7 @@ class BleRepository(
 
             delay(200)
 
-            // F) Status check & snapshot update
+            // H) Status check & snapshot update
             _syncProgressMessage.value = "Updating vitals..."
             val now = System.currentTimeMillis()
             _snapshot.value = _snapshot.value.copy(

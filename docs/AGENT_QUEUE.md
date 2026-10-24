@@ -20,5 +20,5 @@
 [x] F3 Parse workout payloads into data models WorkoutSession / PacePhase / SportHrPoint (map known sportType ints to Walk/Run/Jog/Hike/Other; unknown → "Activity"). Persist Room. If payload layout uncertain, parse what is safe and AppLog rest — no synthetic sessions.
 [x] F4 Sync: after existing history pulls, request 0x0506 workout history; save sessions; empty → log only
 [x] F5 ActivityScreen day list: real WorkoutSession cards for selected day (type, time range, distance, steps). Empty: "No workouts on the ring for this day. Start a sport mode on the ring, then Sync." Keep daily steps summary card separate.
-[ ] F6 Activity detail screen: summary + phase list (pace/steps/distance) + HR chart + SpO2-in-window chart; km/mi from settings; back to day list
-[ ] F7 Move SpO2 + Stress day panels off HeartScreen onto Activity (or More) if still on Heart — Heart = HR + HRV + simple heart summary only
+[x] F6 Activity detail screen: summary + phase list (pace/steps/distance) + HR chart + SpO2-in-window chart; km/mi from settings; back to day list
+[x] F7 Move SpO2 + Stress day panels off HeartScreen onto Activity (or More) if still on Heart — Heart = HR + HRV + simple heart summary only

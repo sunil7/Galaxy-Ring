@@ -48,7 +48,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.galaxy.ring.GalaxyRingApp
+import com.galaxy.ring.data.MonitorMetric
+import com.galaxy.ring.data.MonitoringSettings
 import com.galaxy.ring.data.WorkoutSession
+import com.galaxy.ring.data.toMetricPoint
 import com.galaxy.ring.ui.theme.ActivityGreen
 import com.galaxy.ring.ui.theme.AmberGlow
 import com.galaxy.ring.ui.theme.CyberCyan
@@ -81,8 +84,20 @@ fun ActivityScreen(
 
     val daySteps by repo.getDailySteps(selectedDateStr).collectAsState(initial = null)
     val dayWorkouts by repo.getWorkoutsForDay(selectedDateStr).collectAsState(initial = emptyList())
+    val daySpo2Samples by repo.getSpo2ForDay(selectedCalendar.time).collectAsState(initial = emptyList())
+    val dayStressSamples by repo.getStressForDay(selectedCalendar.time).collectAsState(initial = emptyList())
     val friendlyDateStr = remember(selectedCalendar.timeInMillis) {
         SimpleDateFormat("EEE, MMM d, yyyy", Locale.US).format(selectedCalendar.time)
+    }
+
+    var selectedWorkout by remember { mutableStateOf<WorkoutSession?>(null) }
+
+    if (selectedWorkout != null) {
+        WorkoutDetailScreen(
+            session = selectedWorkout!!,
+            onBack = { selectedWorkout = null }
+        )
+        return
     }
 
     LazyColumn(
@@ -180,7 +195,74 @@ fun ActivityScreen(
                 val workout = dayWorkouts[idx]
                 WorkoutSessionCard(
                     session = workout,
-                    onClick = { onWorkoutClick(workout) }
+                    onClick = {
+                        selectedWorkout = workout
+                        onWorkoutClick(workout)
+                    }
+                )
+            }
+        }
+
+        // Blood Oxygen (SpO2) Day Detail Panel
+        item {
+            val settings = remember { MonitoringSettings(app) }
+            var spo2Config by remember { mutableStateOf(settings.config(MonitorMetric.SPO2)) }
+            val spo2Points = remember(daySpo2Samples) { daySpo2Samples.map { it.toMetricPoint() } }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                MetricDetailPanel(
+                    title = "Blood Oxygen",
+                    unit = "%",
+                    points = spo2Points,
+                    modifier = Modifier.padding(16.dp),
+                    monitoringLabel = "Regular Blood oxygen",
+                    monitoringEnabled = spo2Config.enabled,
+                    intervalMinutes = spo2Config.intervalMin,
+                    onMonitoringEnabledChange = { enabled ->
+                        settings.setEnabled(MonitorMetric.SPO2, enabled)
+                        spo2Config = settings.config(MonitorMetric.SPO2)
+                    },
+                    onIntervalChange = { interval ->
+                        settings.setIntervalMin(MonitorMetric.SPO2, interval)
+                        spo2Config = settings.config(MonitorMetric.SPO2)
+                    },
+                    valueFormat = { it.toInt().toString() }
+                )
+            }
+        }
+
+        // Stress Day Detail Panel
+        item {
+            val settings = remember { MonitoringSettings(app) }
+            var stressConfig by remember { mutableStateOf(settings.config(MonitorMetric.STRESS)) }
+            val stressPoints = remember(dayStressSamples) { dayStressSamples.map { it.toMetricPoint() } }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                MetricDetailPanel(
+                    title = "Stress",
+                    unit = "",
+                    points = stressPoints,
+                    modifier = Modifier.padding(16.dp),
+                    monitoringLabel = "Scheduled Stress",
+                    monitoringEnabled = stressConfig.enabled,
+                    intervalMinutes = stressConfig.intervalMin,
+                    onMonitoringEnabledChange = { enabled ->
+                        settings.setEnabled(MonitorMetric.STRESS, enabled)
+                        stressConfig = settings.config(MonitorMetric.STRESS)
+                    },
+                    onIntervalChange = { interval ->
+                        settings.setIntervalMin(MonitorMetric.STRESS, interval)
+                        stressConfig = settings.config(MonitorMetric.STRESS)
+                    },
+                    valueFormat = { it.toInt().toString() }
                 )
             }
         }
