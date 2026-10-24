@@ -172,7 +172,9 @@ fun WorkoutDetailScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(
                             onClick = onBack,
-                            modifier = Modifier.testTag("workout_detail_back_button")
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("workout_detail_back_button")
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,

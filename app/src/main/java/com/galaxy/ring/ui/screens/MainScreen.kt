@@ -160,6 +160,7 @@ fun MainScreen(
     var showScanSheet by remember { mutableStateOf(false) }
     var isFindingRing by remember { mutableStateOf(false) }
     var showAdminScreen by remember { mutableStateOf(false) }
+    var showHistoryScreen by remember { mutableStateOf(false) }
 
     val bottomSheetState = rememberModalBottomSheetState()
 
@@ -202,6 +203,16 @@ fun MainScreen(
 
     if (showAdminScreen) {
         AdminScreen(onNavigateBack = { showAdminScreen = false })
+        return
+    }
+
+    if (showHistoryScreen) {
+        HistoryScreen(
+            onNavigateBack = { showHistoryScreen = false },
+            onSyncFromRing = handleSyncFromRing,
+            isSyncing = isSyncing,
+            syncProgressText = syncProgressMsg
+        )
         return
     }
 
@@ -344,7 +355,8 @@ fun MainScreen(
                         onOpenHealthRationale = onOpenRationale,
                         hasHealthPermissions = hasHealthPermissions,
                         onRequestHealthPermissions = onRequestHealthPermissions,
-                        onOpenAdmin = { showAdminScreen = true }
+                        onOpenAdmin = { showAdminScreen = true },
+                        onOpenHistory = { showHistoryScreen = true }
                     )
                 }
             }

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -52,6 +53,7 @@ import com.galaxy.ring.data.MonitorMetric
 import com.galaxy.ring.data.MonitoringSettings
 import com.galaxy.ring.data.WorkoutSession
 import com.galaxy.ring.data.toMetricPoint
+import androidx.compose.ui.platform.testTag
 import com.galaxy.ring.ui.theme.ActivityGreen
 import com.galaxy.ring.ui.theme.AmberGlow
 import com.galaxy.ring.ui.theme.CyberCyan
@@ -61,6 +63,9 @@ import com.galaxy.ring.ui.theme.DarkSurfaceVariant
 import com.galaxy.ring.ui.theme.ElectricViolet
 import com.galaxy.ring.ui.theme.RosePulse
 import com.galaxy.ring.ui.theme.SectionHeader
+import com.galaxy.ring.ui.theme.ShapeMedium
+import com.galaxy.ring.ui.theme.ShapeSmall
+import com.galaxy.ring.ui.theme.Spacing
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -103,22 +108,26 @@ fun ActivityScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .testTag("activity_screen")
+            .padding(horizontal = Spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(Spacing.lg)
     ) {
-        item { Spacer(modifier = Modifier.height(8.dp)) }
+        item { Spacer(modifier = Modifier.height(Spacing.sm)) }
 
         // Date Selector Bar
         item {
             Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("activity_date_card"),
+                shape = ShapeMedium,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(horizontal = Spacing.md, vertical = Spacing.sm),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -126,7 +135,10 @@ fun ActivityScreen(
                         onClick = {
                             val prev = (selectedCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -1) }
                             selectedCalendar = prev
-                        }
+                        },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("activity_prev_day")
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -137,7 +149,7 @@ fun ActivityScreen(
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
                         Icon(
                             imageVector = Icons.Default.CalendarMonth,
@@ -157,7 +169,10 @@ fun ActivityScreen(
                         onClick = {
                             val next = (selectedCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, 1) }
                             selectedCalendar = next
-                        }
+                        },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("activity_next_day")
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
@@ -210,15 +225,18 @@ fun ActivityScreen(
             val spo2Points = remember(daySpo2Samples) { daySpo2Samples.map { it.toMetricPoint() } }
 
             Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("activity_spo2_panel"),
+                shape = ShapeMedium,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
             ) {
                 MetricDetailPanel(
                     title = "Blood Oxygen",
                     unit = "%",
                     points = spo2Points,
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(Spacing.lg),
                     monitoringLabel = "Regular Blood oxygen",
                     monitoringEnabled = spo2Config.enabled,
                     intervalMinutes = spo2Config.intervalMin,
@@ -242,15 +260,18 @@ fun ActivityScreen(
             val stressPoints = remember(dayStressSamples) { dayStressSamples.map { it.toMetricPoint() } }
 
             Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("activity_stress_panel"),
+                shape = ShapeMedium,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
             ) {
                 MetricDetailPanel(
                     title = "Stress",
                     unit = "",
                     points = stressPoints,
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(Spacing.lg),
                     monitoringLabel = "Scheduled Stress",
                     monitoringEnabled = stressConfig.enabled,
                     intervalMinutes = stressConfig.intervalMin,
@@ -282,15 +303,17 @@ fun WorkoutEmptyState(
     modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("workout_empty_state"),
+        shape = ShapeMedium,
         colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant.copy(alpha = 0.35f)),
         border = BorderStroke(1.dp, DarkCardBorder.copy(alpha = 0.4f))
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
+                .padding(Spacing.lg),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
@@ -300,7 +323,7 @@ fun WorkoutEmptyState(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 modifier = Modifier.size(32.dp)
             )
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(Spacing.sm))
             Text(
                 text = "No workouts on the ring for this day. Start a sport mode on the ring, then Sync.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -308,7 +331,7 @@ fun WorkoutEmptyState(
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(Spacing.md))
             Button(
                 onClick = onSyncClick,
                 enabled = !isSyncing,
@@ -316,8 +339,11 @@ fun WorkoutEmptyState(
                     containerColor = CyberCyan,
                     contentColor = Color(0xFF021B2D)
                 ),
-                shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
+                shape = ShapeSmall,
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .defaultMinSize(minHeight = 48.dp, minWidth = 48.dp)
+                    .testTag("workout_empty_sync_button")
             ) {
                 Icon(
                     imageVector = Icons.Default.Sync,
@@ -346,10 +372,12 @@ fun WorkoutSessionCard(
 ) {
     val cardModifier = modifier
         .fillMaxWidth()
+        .testTag("workout_session_card_${session.id}")
         .then(
             if (onClick != null) {
                 Modifier
-                    .clip(RoundedCornerShape(16.dp))
+                    .defaultMinSize(minHeight = 48.dp)
+                    .clip(ShapeMedium)
                     .clickable(onClick = onClick)
             } else {
                 Modifier
@@ -380,14 +408,14 @@ fun WorkoutSessionCard(
 
     Card(
         modifier = cardModifier,
-        shape = RoundedCornerShape(16.dp),
+        shape = ShapeMedium,
         colors = CardDefaults.cardColors(containerColor = DarkSurface),
         border = BorderStroke(1.dp, DarkCardBorder.copy(alpha = 0.6f))
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(Spacing.lg)
         ) {
             // Header: Sport Type + Time Range + Duration Pill
             Row(

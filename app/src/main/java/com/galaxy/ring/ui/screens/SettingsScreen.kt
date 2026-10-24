@@ -22,8 +22,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BugReport
@@ -76,6 +78,9 @@ import com.galaxy.ring.ui.theme.ElectricViolet
 import com.galaxy.ring.ui.theme.NeonEmerald
 import com.galaxy.ring.ui.theme.RosePulse
 import com.galaxy.ring.ui.theme.SectionHeader
+import com.galaxy.ring.ui.theme.ShapeMedium
+import com.galaxy.ring.ui.theme.ShapeSmall
+import com.galaxy.ring.ui.theme.Spacing
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -86,7 +91,8 @@ fun SettingsScreen(
     onOpenHealthRationale: () -> Unit,
     hasHealthPermissions: Boolean,
     onRequestHealthPermissions: () -> Unit = {},
-    onOpenAdmin: () -> Unit = {}
+    onOpenAdmin: () -> Unit = {},
+    onOpenHistory: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val app = GalaxyRingApp.instance
@@ -192,10 +198,10 @@ fun SettingsScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = Spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(Spacing.lg)
     ) {
-        item { Spacer(modifier = Modifier.height(4.dp)) }
+        item { Spacer(modifier = Modifier.height(Spacing.xs)) }
 
         // Top Section Card: Admin / Debug (Clearly visible, single tap)
         item {
@@ -203,24 +209,25 @@ fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("admin_debug_top_card"),
-                shape = RoundedCornerShape(20.dp),
+                shape = ShapeMedium,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
                 border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
             ) {
-                Column(modifier = Modifier.padding(18.dp)) {
+                Column(modifier = Modifier.padding(Spacing.lg)) {
                     SectionHeader(
                         title = "Admin & Diagnostics",
                         subtitle = "View BLE traffic and export troubleshooting logs"
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
 
                     Button(
                         onClick = onOpenAdmin,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
                             .testTag("open_admin_panel_button"),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = ShapeSmall,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary
@@ -231,9 +238,52 @@ fun SettingsScreen(
                             contentDescription = null,
                             modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(Spacing.sm))
                         Text(
                             text = "Open Admin Panel",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                    }
+                }
+            }
+        }
+
+        // Biometric History & Calendar Card
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("history_calendar_entry_card"),
+                shape = ShapeMedium,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+            ) {
+                Column(modifier = Modifier.padding(Spacing.lg)) {
+                    SectionHeader(
+                        title = "Biometric Calendar & History",
+                        subtitle = "Browse past days, timelines, and recorded vitals"
+                    )
+
+                    Spacer(modifier = Modifier.height(Spacing.md))
+
+                    OutlinedButton(
+                        onClick = onOpenHistory,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("open_history_calendar_button"),
+                        shape = ShapeSmall
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CalendarMonth,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = CyberCyan
+                        )
+                        Spacer(modifier = Modifier.width(Spacing.sm))
+                        Text(
+                            text = "View History Calendar",
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.titleSmall
                         )
@@ -246,17 +296,17 @@ fun SettingsScreen(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
+                shape = ShapeMedium,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
             ) {
-                Column(modifier = Modifier.padding(18.dp)) {
+                Column(modifier = Modifier.padding(Spacing.lg)) {
                     SectionHeader(
                         title = "Connection & Pairing",
                         subtitle = "Hold BLE GATT link and configure OS-level bonding"
                     )
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -281,7 +331,7 @@ fun SettingsScreen(
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
+                            Spacer(modifier = Modifier.width(Spacing.md))
                             Column {
                                 Text(
                                     text = "Keep ring connected",
@@ -320,7 +370,7 @@ fun SettingsScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(Spacing.lg))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -345,7 +395,7 @@ fun SettingsScreen(
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
+                            Spacer(modifier = Modifier.width(Spacing.md))
                             Column {
                                 Text(
                                     text = "Pair / bond ring",
@@ -375,7 +425,7 @@ fun SettingsScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
                     Text(
                         text = "Note: Pairing improves reconnection; keeping the link while the app is closed requires the foreground service notification ('Keep ring connected').",
                         style = MaterialTheme.typography.bodySmall,
@@ -389,21 +439,21 @@ fun SettingsScreen(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
+                shape = ShapeMedium,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
             ) {
-                Column(modifier = Modifier.padding(18.dp)) {
+                Column(modifier = Modifier.padding(Spacing.lg)) {
                     SectionHeader(
                         title = "Screen Brightness",
                         subtitle = "Current: ${selectedBrightness.label}"
                     )
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
                         ScreenBrightness.values().forEach { brightness ->
                             val selected = selectedBrightness == brightness
@@ -422,7 +472,9 @@ fun SettingsScreen(
                                     }
                                 },
                                 label = { Text(brightness.label, style = MaterialTheme.typography.labelSmall) },
-                                modifier = Modifier.testTag("brightness_chip_${brightness.name.lowercase()}"),
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("brightness_chip_${brightness.name.lowercase()}"),
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = MaterialTheme.colorScheme.primary,
                                     selectedLabelColor = MaterialTheme.colorScheme.onPrimary
@@ -432,7 +484,7 @@ fun SettingsScreen(
                     }
 
                     if (brightnessStatusMessage != null) {
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(Spacing.sm))
                         Text(
                             text = brightnessStatusMessage!!,
                             style = MaterialTheme.typography.bodySmall,
@@ -448,17 +500,17 @@ fun SettingsScreen(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
+                shape = ShapeMedium,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
             ) {
-                Column(modifier = Modifier.padding(18.dp)) {
+                Column(modifier = Modifier.padding(Spacing.lg)) {
                     SectionHeader(
                         title = "Health Monitoring",
                         subtitle = "Automated background biometric logging"
                     )
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
 
                     // 1. All-day Heart Rate
                     HealthMonitoringMetricRow(
@@ -476,9 +528,9 @@ fun SettingsScreen(
                         }
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)))
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
 
                     // 2. Regular Blood oxygen
                     HealthMonitoringMetricRow(
@@ -496,9 +548,9 @@ fun SettingsScreen(
                         }
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)))
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
 
                     // 3. Regular HRV
                     HealthMonitoringMetricRow(
@@ -516,9 +568,9 @@ fun SettingsScreen(
                         }
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)))
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
 
                     // 4. Scheduled Stress
                     HealthMonitoringMetricRow(
@@ -536,9 +588,9 @@ fun SettingsScreen(
                         }
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(Spacing.lg))
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)))
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(Spacing.lg))
 
                     // Last Run info
                     Text(
@@ -547,7 +599,7 @@ fun SettingsScreen(
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(Spacing.xxs))
                     val lastRunTime = if (repo.lastScheduleRunTimestamp > 0) {
                         SimpleDateFormat("MMM d, HH:mm:ss", Locale.getDefault()).format(Date(repo.lastScheduleRunTimestamp))
                     } else {
@@ -574,17 +626,17 @@ fun SettingsScreen(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
+                shape = ShapeMedium,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
             ) {
-                Column(modifier = Modifier.padding(18.dp)) {
+                Column(modifier = Modifier.padding(Spacing.lg)) {
                     SectionHeader(
                         title = "Sleep Apnea Screening Symptoms",
                         subtitle = "Self-reported symptoms for overnight breathing risk heuristic"
                     )
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
 
                     Text(
                         text = "These indicators are used as weighted factors alongside your Galaxy Ring nocturnal SpO₂ and sleep continuity metrics in the Overnight Breathing Indicators screening card:",
@@ -592,16 +644,18 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
                             .clickable {
                                 val next = !apneaSnoring
                                 apneaSnoring = next
                                 repo.apneaLoudSnoring = next
-                            },
+                            }
+                            .testTag("apnea_snoring_row"),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Checkbox(
@@ -612,7 +666,7 @@ fun SettingsScreen(
                             },
                             colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(Spacing.xs))
                         Text(
                             text = "Habitual or loud snoring",
                             style = MaterialTheme.typography.bodyMedium,
@@ -623,11 +677,13 @@ fun SettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
                             .clickable {
                                 val next = !apneaSleepiness
                                 apneaSleepiness = next
                                 repo.apneaDaytimeSleepiness = next
-                            },
+                            }
+                            .testTag("apnea_sleepiness_row"),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Checkbox(
@@ -638,7 +694,7 @@ fun SettingsScreen(
                             },
                             colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(Spacing.xs))
                         Text(
                             text = "Excessive daytime tiredness / somnolence",
                             style = MaterialTheme.typography.bodyMedium,
@@ -649,11 +705,13 @@ fun SettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
                             .clickable {
                                 val next = !apneaPauses
                                 apneaPauses = next
                                 repo.apneaObservedPauses = next
-                            },
+                            }
+                            .testTag("apnea_pauses_row"),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Checkbox(
@@ -664,7 +722,7 @@ fun SettingsScreen(
                             },
                             colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(Spacing.xs))
                         Text(
                             text = "Observed breathing pauses or gasping during sleep",
                             style = MaterialTheme.typography.bodyMedium,
@@ -679,17 +737,17 @@ fun SettingsScreen(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
+                shape = ShapeMedium,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
             ) {
-                Column(modifier = Modifier.padding(18.dp)) {
+                Column(modifier = Modifier.padding(Spacing.lg)) {
                     SectionHeader(
                         title = "Battery Optimization Exclusion",
                         subtitle = if (isIgnoringBatteryOptimizations) "Exclusion active (Unrestricted)" else "Optimization may pause checks"
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
 
                     Text(
                         text = "Android power managers put background processes into deep sleep. To keep scheduled checks running reliably when the screen is locked, exclude Galaxy Ring from battery restrictions.",
@@ -697,7 +755,7 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
 
                     OutlinedButton(
                         onClick = {
@@ -713,11 +771,14 @@ fun SettingsScreen(
                                 }
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("battery_optimization_button"),
+                        shape = ShapeSmall
                     ) {
                         Icon(imageVector = Icons.Outlined.BatteryChargingFull, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(Spacing.sm))
                         Text(if (isIgnoringBatteryOptimizations) "Battery Settings (Active)" else "Exclude from Battery Restrictions")
                     }
                 }
@@ -733,38 +794,39 @@ fun SettingsScreen(
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
+                shape = ShapeMedium,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
             ) {
-                Column(modifier = Modifier.padding(18.dp)) {
+                Column(modifier = Modifier.padding(Spacing.lg)) {
                     SectionHeader(
                         title = "Health Connect Status",
                         subtitle = if (hasHealthPermissions) "Permitted: Yes (All permissions granted)" else "Permitted: No (Permissions required)"
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
 
                     if (!hasHealthPermissions) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(ShapeSmall)
                                 .background(RosePulse.copy(alpha = 0.12f))
-                                .padding(12.dp)
+                                .padding(Spacing.md)
                         ) {
                             Text(
                                 text = "Health Connect permission required to write HR, SpO₂, steps, and sleep records to Android Health Connect.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(Spacing.sm))
                             Button(
                                 onClick = onRequestHealthPermissions,
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .defaultMinSize(minHeight = 48.dp)
                                     .testTag("connect_health_connect_button"),
-                                shape = RoundedCornerShape(10.dp),
+                                shape = ShapeSmall,
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.primary,
                                     contentColor = MaterialTheme.colorScheme.onPrimary
@@ -776,16 +838,16 @@ fun SettingsScreen(
                                 )
                             }
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(Spacing.md))
                     }
 
                     // Status Breakdown
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(ShapeSmall)
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                            .padding(12.dp),
+                            .padding(Spacing.md),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Row(
@@ -862,7 +924,7 @@ fun SettingsScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
 
                     Text(
                         text = "Synchronizes steps, heart rate, oxygen saturation (SpO₂), skin temperature, and sleep stages directly with Android Health Connect.",
@@ -870,7 +932,7 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
 
                     // Helpful FW Note for Sleep
                     Text(
@@ -879,13 +941,15 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(Spacing.md))
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onOpenHealthRationale() },
-                            verticalAlignment = Alignment.CenterVertically
+                            .defaultMinSize(minHeight = 48.dp)
+                            .clickable { onOpenHealthRationale() }
+                            .testTag("health_rationale_row"),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Info,
@@ -893,7 +957,7 @@ fun SettingsScreen(
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(Spacing.sm))
                         Text(
                             text = "View Permissions Rationale & Data Privacy",
                             style = MaterialTheme.typography.bodySmall,
@@ -908,13 +972,13 @@ fun SettingsScreen(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
+                shape = ShapeMedium,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
+                        .padding(Spacing.lg),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
@@ -976,10 +1040,10 @@ private fun HealthMonitoringMetricRow(
         }
 
         if (config.enabled) {
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(Spacing.sm))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
             ) {
                 MonitoringSchedule.INTERVAL_OPTIONS_MIN.forEach { minutes ->
                     val selected = config.intervalMin == minutes
@@ -988,6 +1052,9 @@ private fun HealthMonitoringMetricRow(
                         selected = selected,
                         onClick = { onIntervalChange(minutes) },
                         label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                        modifier = Modifier
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("interval_chip_${metric.prefKey}_$minutes"),
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primary,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimary

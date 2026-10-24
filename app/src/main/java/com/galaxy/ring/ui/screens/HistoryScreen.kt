@@ -73,10 +73,17 @@ import com.galaxy.ring.data.OxygenSaturationEntity
 import com.galaxy.ring.data.SleepSessionEntity
 import com.galaxy.ring.data.HrvEntity
 import com.galaxy.ring.data.StressEntity
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.defaultMinSize
+import com.galaxy.ring.ui.components.EmptyState
 import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
 import com.galaxy.ring.ui.theme.NeonEmerald
 import com.galaxy.ring.ui.theme.RosePulse
+import com.galaxy.ring.ui.theme.ShapeMedium
+import com.galaxy.ring.ui.theme.ShapeSmall
+import com.galaxy.ring.ui.theme.Spacing
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -86,10 +93,15 @@ private const val TAG = "GalaxyRingHistory"
 
 @Composable
 fun HistoryScreen(
+    onNavigateBack: (() -> Unit)? = null,
     onSyncFromRing: () -> Unit = {},
     isSyncing: Boolean = false,
     syncProgressText: String? = null
 ) {
+    if (onNavigateBack != null) {
+        BackHandler { onNavigateBack() }
+    }
+
     val app = GalaxyRingApp.instance
     val repo = app.healthRepository
 
@@ -117,10 +129,42 @@ fun HistoryScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .testTag("history_screen")
+            .padding(horizontal = Spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(Spacing.lg)
     ) {
-        item { Spacer(modifier = Modifier.height(8.dp)) }
+        item { Spacer(modifier = Modifier.height(Spacing.sm)) }
+
+        if (onNavigateBack != null) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = Spacing.xs),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = onNavigateBack,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("history_back_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(Spacing.xs))
+                    Text(
+                        text = "Biometric History",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
 
         // 1. Calendar Month Card
         item {
@@ -158,7 +202,7 @@ fun HistoryScreen(
                         tint = CyberCyan,
                         modifier = Modifier.size(20.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(Spacing.sm))
                     Text(
                         text = friendlyDateStr,
                         style = MaterialTheme.typography.titleMedium,
@@ -169,13 +213,15 @@ fun HistoryScreen(
                 Button(
                     onClick = onSyncFromRing,
                     enabled = !isSyncing,
-                    modifier = Modifier.testTag("history_sync_button"),
-                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 48.dp)
+                        .testTag("history_sync_button"),
+                    shape = ShapeSmall,
                     colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
                 ) {
                     if (isSyncing) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(14.dp),
+                            modifier = Modifier.size(16.dp),
                             color = Color(0xFF0F172A),
                             strokeWidth = 2.dp
                         )
@@ -186,7 +232,7 @@ fun HistoryScreen(
                             tint = Color(0xFF0F172A),
                             modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Spacer(modifier = Modifier.width(Spacing.xs))
                         Text("Sync", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
                     }
                 }
@@ -253,11 +299,14 @@ fun HeartRateDayTimelineCard(
     var showTimelineList by remember { mutableStateOf(false) }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("history_hr_card"),
+        shape = ShapeMedium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
+        Column(modifier = Modifier.padding(Spacing.lg)) {
             // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -274,12 +323,12 @@ fun HeartRateDayTimelineCard(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Favorite,
-                            contentDescription = null,
+                            contentDescription = "Heart Rate",
                             tint = RosePulse,
                             modifier = Modifier.size(18.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(Spacing.sm))
                     Column {
                         Text(
                             text = "Heart Rate (24h Timeline)",
@@ -302,40 +351,14 @@ fun HeartRateDayTimelineCard(
                 )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(Spacing.md))
 
             if (samples.isEmpty()) {
-                // Empty state required by Feature 1.A
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.ShowChart,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(32.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "No heart rate data for this day",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Connect ring or enable scheduled background checks",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
-                    }
-                }
+                EmptyState(
+                    message = "No heart rate data for this day",
+                    icon = Icons.Default.ShowChart,
+                    modifier = Modifier.testTag("history_hr_empty")
+                )
             } else {
                 // Metric Pills
                 val minBpm = samples.minOf { it.bpm }
@@ -351,7 +374,7 @@ fun HeartRateDayTimelineCard(
                     MetricPill(label = "Max", value = "$maxBpm", unit = "BPM", color = RosePulse)
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(Spacing.lg))
 
                 // 24h Line Chart Canvas
                 Day24hLineChart(
@@ -365,15 +388,16 @@ fun HeartRateDayTimelineCard(
                     guidelineValues = listOf(60f, 80f, 100f, 120f)
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(Spacing.md))
 
                 // Toggle for detailed timeline list
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .defaultMinSize(minHeight = 48.dp)
+                        .clip(ShapeSmall)
                         .clickable { showTimelineList = !showTimelineList }
-                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                        .padding(vertical = Spacing.sm, horizontal = Spacing.xs),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -384,7 +408,7 @@ fun HeartRateDayTimelineCard(
                             tint = CyberCyan,
                             modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(Spacing.xs))
                         Text(
                             text = if (showTimelineList) "Hide Sample Readings" else "View Timeline Readings (${samples.size})",
                             style = MaterialTheme.typography.labelMedium,
@@ -401,7 +425,7 @@ fun HeartRateDayTimelineCard(
                 }
 
                 AnimatedVisibility(visible = showTimelineList) {
-                    Column(modifier = Modifier.padding(top = 8.dp)) {
+                    Column(modifier = Modifier.padding(top = Spacing.sm)) {
                         GroupedDayTimelineList(
                             samples = samples.map {
                                 TimelineSample(
@@ -431,11 +455,14 @@ fun Spo2DayTimelineCard(
     var showTimelineList by remember { mutableStateOf(false) }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("history_spo2_card"),
+        shape = ShapeMedium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
+        Column(modifier = Modifier.padding(Spacing.lg)) {
             // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -452,12 +479,12 @@ fun Spo2DayTimelineCard(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Bloodtype,
-                            contentDescription = null,
+                            contentDescription = "Oxygen Saturation",
                             tint = CyberCyan,
                             modifier = Modifier.size(18.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(Spacing.sm))
                     Column {
                         Text(
                             text = "SpO₂ (24h Timeline)",
@@ -480,40 +507,14 @@ fun Spo2DayTimelineCard(
                 )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(Spacing.md))
 
             if (samples.isEmpty()) {
-                // Empty state required by Feature 1.B
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.Bloodtype,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(32.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "No SpO₂ data for this day",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Take a manual reading or enable automatic SpO₂ checks",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
-                    }
-                }
+                EmptyState(
+                    message = "No SpO₂ data for this day",
+                    icon = Icons.Default.Bloodtype,
+                    modifier = Modifier.testTag("history_spo2_empty")
+                )
             } else {
                 // Metric Pills
                 val minSpo2 = samples.minOf { it.percentage }.toInt()
@@ -529,7 +530,7 @@ fun Spo2DayTimelineCard(
                     MetricPill(label = "Max", value = "$maxSpo2", unit = "%", color = ElectricViolet)
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(Spacing.lg))
 
                 // 24h Line Chart Canvas (85% - 100%)
                 Day24hLineChart(
@@ -543,15 +544,16 @@ fun Spo2DayTimelineCard(
                     guidelineValues = listOf(90f, 95f, 100f)
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(Spacing.md))
 
                 // Toggle for detailed timeline list
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .defaultMinSize(minHeight = 48.dp)
+                        .clip(ShapeSmall)
                         .clickable { showTimelineList = !showTimelineList }
-                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                        .padding(vertical = Spacing.sm, horizontal = Spacing.xs),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -562,7 +564,7 @@ fun Spo2DayTimelineCard(
                             tint = CyberCyan,
                             modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(Spacing.xs))
                         Text(
                             text = if (showTimelineList) "Hide Sample Readings" else "View Timeline Readings (${samples.size})",
                             style = MaterialTheme.typography.labelMedium,
@@ -579,7 +581,7 @@ fun Spo2DayTimelineCard(
                 }
 
                 AnimatedVisibility(visible = showTimelineList) {
-                    Column(modifier = Modifier.padding(top = 8.dp)) {
+                    Column(modifier = Modifier.padding(top = Spacing.sm)) {
                         GroupedDayTimelineList(
                             samples = samples.map {
                                 TimelineSample(
@@ -629,7 +631,7 @@ fun Day24hLineChart(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(180.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(ShapeSmall)
                 .background(Color(0xFF0F172A))
         ) {
             Canvas(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp)) {
@@ -822,10 +824,10 @@ fun GroupedDayTimelineList(samples: List<TimelineSample>) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(ShapeSmall)
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         periods.forEach { (periodLabel, periodSamples) ->
             if (periodSamples.isNotEmpty()) {
@@ -902,18 +904,26 @@ fun CalendarMonthView(
     val leadingEmptyDays = (firstDayOfWeek - 2 + 7) % 7 // Monday-first offset
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("history_calendar_card"),
+        shape = ShapeMedium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(Spacing.lg)) {
             // Month Header with arrows
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onPreviousMonth) {
+                IconButton(
+                    onClick = onPreviousMonth,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("btn_prev_month")
+                ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Previous Month",
@@ -926,7 +936,12 @@ fun CalendarMonthView(
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                IconButton(onClick = onNextMonth) {
+                IconButton(
+                    onClick = onNextMonth,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("btn_next_month")
+                ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                         contentDescription = "Next Month",
@@ -935,7 +950,7 @@ fun CalendarMonthView(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(Spacing.sm))
 
             // Day of week labels (M T W T F S S)
             val weekDayLabels = listOf("M", "T", "W", "T", "F", "S", "S")
@@ -946,13 +961,13 @@ fun CalendarMonthView(
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.width(36.dp),
+                        modifier = Modifier.width(44.dp),
                         textAlign = TextAlign.Center
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(Spacing.sm))
 
             // Day Grid (up to 6 rows)
             var currentDay = 1
@@ -969,7 +984,7 @@ fun CalendarMonthView(
                     for (col in 0..6) {
                         val cellIndex = row * 7 + col
                         if (cellIndex < leadingEmptyDays || currentDay > daysInMonth) {
-                            Box(modifier = Modifier.size(36.dp))
+                            Box(modifier = Modifier.size(44.dp))
                         } else {
                             val thisDay = currentDay
                             val cellCal = (displayedMonthCal.clone() as Calendar).apply {
@@ -984,8 +999,9 @@ fun CalendarMonthView(
 
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
+                                    .size(44.dp)
                                     .clip(CircleShape)
+                                    .testTag("history_day_cell_$dateStr")
                                     .background(
                                         if (isSelected) CyberCyan else Color.Transparent
                                     )
@@ -1043,11 +1059,14 @@ fun CalendarMonthView(
 @Composable
 fun HistoryStepsCard(steps: DailyStepsEntity?) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("history_steps_card"),
+        shape = ShapeMedium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(Spacing.lg)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1056,11 +1075,11 @@ fun HistoryStepsCard(steps: DailyStepsEntity?) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.DirectionsWalk,
-                        contentDescription = null,
+                        contentDescription = "Steps Activity",
                         tint = CyberCyan,
                         modifier = Modifier.size(20.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(Spacing.sm))
                     Text(
                         text = "Steps Activity",
                         style = MaterialTheme.typography.titleMedium,
@@ -1069,13 +1088,13 @@ fun HistoryStepsCard(steps: DailyStepsEntity?) {
                     )
                 }
                 Text(
-                    text = if (steps != null) "Goal: 10,000" else "No Data",
+                    text = if (steps != null) "Daily Total" else "No Data",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(Spacing.sm))
 
             if (steps != null) {
                 Text(
@@ -1084,27 +1103,27 @@ fun HistoryStepsCard(steps: DailyStepsEntity?) {
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(Spacing.sm))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Calories: ${steps.caloriesKcal} kcal",
+                        text = "Energy: ${steps.caloriesKcal} kcal",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = String.format("Distance: %.2f km", steps.distanceMeters / 1000.0),
+                        text = String.format(Locale.US, "Distance: %.2f km", steps.distanceMeters / 1000.0),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             } else {
-                Text(
-                    text = "No step samples recorded for this date.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                EmptyState(
+                    message = "No step samples recorded for this date.",
+                    icon = Icons.AutoMirrored.Filled.DirectionsWalk,
+                    modifier = Modifier.testTag("history_steps_empty")
                 )
             }
         }
@@ -1114,11 +1133,14 @@ fun HistoryStepsCard(steps: DailyStepsEntity?) {
 @Composable
 fun HistorySleepCard(sleep: SleepSessionEntity?) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("history_sleep_card"),
+        shape = ShapeMedium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(Spacing.lg)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1127,11 +1149,11 @@ fun HistorySleepCard(sleep: SleepSessionEntity?) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = Icons.Default.Nightlight,
-                        contentDescription = null,
+                        contentDescription = "Sleep Session",
                         tint = ElectricViolet,
                         modifier = Modifier.size(20.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(Spacing.sm))
                     Text(
                         text = "Sleep Session",
                         style = MaterialTheme.typography.titleMedium,
@@ -1141,40 +1163,40 @@ fun HistorySleepCard(sleep: SleepSessionEntity?) {
                 }
                 if (sleep != null) {
                     Text(
-                        text = "Score: ${sleep.sleepScore}",
+                        text = "Efficiency: ${(sleep.sleepEfficiency * 100).toInt()}%",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = ElectricViolet,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(ShapeSmall)
                             .background(ElectricViolet.copy(alpha = 0.15f))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .padding(horizontal = Spacing.sm, vertical = Spacing.xxs)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(Spacing.sm))
 
             if (sleep != null) {
                 val hours = sleep.durationMinutes / 60
                 val mins = sleep.durationMinutes % 60
                 Text(
-                    text = "${hours}h ${mins}m in bed",
+                    text = "${hours}h ${mins}m duration",
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(Spacing.xs))
                 Text(
                     text = "Deep: ${sleep.deepMinutes}m  •  REM: ${sleep.remMinutes}m  •  Light: ${sleep.lightMinutes}m  •  Awake: ${sleep.awakeMinutes}m",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                Text(
-                    text = "No sleep session recorded for this date.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                EmptyState(
+                    message = "No sleep session recorded for this date.",
+                    icon = Icons.Default.Nightlight,
+                    modifier = Modifier.testTag("history_sleep_empty")
                 )
             }
         }
@@ -1202,11 +1224,14 @@ fun HrvDayTimelineCard(
     var showTimelineList by remember { mutableStateOf(false) }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("history_hrv_card"),
+        shape = ShapeMedium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
+        Column(modifier = Modifier.padding(Spacing.lg)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1222,12 +1247,12 @@ fun HrvDayTimelineCard(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Timeline,
-                            contentDescription = null,
+                            contentDescription = "Heart Rate Variability",
                             tint = ElectricViolet,
                             modifier = Modifier.size(18.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(Spacing.sm))
                     Column {
                         Text(
                             text = "HRV (Heart Rate Variability)",
@@ -1250,39 +1275,14 @@ fun HrvDayTimelineCard(
                 )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(Spacing.md))
 
             if (samples.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.ShowChart,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(32.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "No HRV data for this day",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Tap 'Measure HRV' on the Device dashboard",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
-                    }
-                }
+                EmptyState(
+                    message = "No HRV data for this day",
+                    icon = Icons.Default.Timeline,
+                    modifier = Modifier.testTag("history_hrv_empty")
+                )
             } else {
                 val minHrv = samples.minOf { it.hrvMs }
                 val avgHrv = samples.map { it.hrvMs }.average().toInt()
@@ -1297,14 +1297,15 @@ fun HrvDayTimelineCard(
                     MetricPill(label = "Max", value = "$maxHrv", unit = "ms", color = NeonEmerald)
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(Spacing.md))
 
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .defaultMinSize(minHeight = 48.dp)
+                        .clip(ShapeSmall)
                         .clickable { showTimelineList = !showTimelineList }
-                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                        .padding(vertical = Spacing.sm, horizontal = Spacing.xs),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -1315,7 +1316,7 @@ fun HrvDayTimelineCard(
                             tint = CyberCyan,
                             modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(Spacing.xs))
                         Text(
                             text = if (showTimelineList) "Hide Sample Readings" else "View Timeline Readings (${samples.size})",
                             style = MaterialTheme.typography.labelMedium,
@@ -1333,16 +1334,16 @@ fun HrvDayTimelineCard(
 
                 AnimatedVisibility(visible = showTimelineList) {
                     Column(
-                        modifier = Modifier.padding(top = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.padding(top = Spacing.sm),
+                        verticalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
                         samples.reversed().forEach { sample ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(ShapeSmall)
                                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    .padding(horizontal = Spacing.md, vertical = Spacing.sm),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -1374,11 +1375,14 @@ fun StressDayTimelineCard(
     var showTimelineList by remember { mutableStateOf(false) }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("history_stress_card"),
+        shape = ShapeMedium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
+        Column(modifier = Modifier.padding(Spacing.lg)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1394,12 +1398,12 @@ fun StressDayTimelineCard(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Timeline,
-                            contentDescription = null,
+                            contentDescription = "Stress Level",
                             tint = Color(0xFFF59E0B),
                             modifier = Modifier.size(18.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(Spacing.sm))
                     Column {
                         Text(
                             text = "Stress Level",
@@ -1422,39 +1426,14 @@ fun StressDayTimelineCard(
                 )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(Spacing.md))
 
             if (samples.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.ShowChart,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(32.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "No stress data for this day",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Tap 'Measure Stress' on the Device dashboard",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
-                    }
-                }
+                EmptyState(
+                    message = "No stress data for this day",
+                    icon = Icons.Default.Timeline,
+                    modifier = Modifier.testTag("history_stress_empty")
+                )
             } else {
                 val minStress = samples.minOf { it.stressScore }
                 val avgStress = samples.map { it.stressScore }.average().toInt()
@@ -1469,14 +1448,15 @@ fun StressDayTimelineCard(
                     MetricPill(label = "Max", value = "$maxStress", unit = "", color = Color(0xFFF59E0B))
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(Spacing.md))
 
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .defaultMinSize(minHeight = 48.dp)
+                        .clip(ShapeSmall)
                         .clickable { showTimelineList = !showTimelineList }
-                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                        .padding(vertical = Spacing.sm, horizontal = Spacing.xs),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -1487,7 +1467,7 @@ fun StressDayTimelineCard(
                             tint = CyberCyan,
                             modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(Spacing.xs))
                         Text(
                             text = if (showTimelineList) "Hide Sample Readings" else "View Timeline Readings (${samples.size})",
                             style = MaterialTheme.typography.labelMedium,
@@ -1505,14 +1485,14 @@ fun StressDayTimelineCard(
 
                 AnimatedVisibility(visible = showTimelineList) {
                     Column(
-                        modifier = Modifier.padding(top = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.padding(top = Spacing.sm),
+                        verticalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
                         samples.reversed().forEach { sample ->
                             val label = when {
                                 sample.stressScore <= 29 -> "Low"
-                                sample.stressScore <= 59 -> "Normal"
-                                sample.stressScore <= 79 -> "Medium"
+                                sample.stressScore <= 59 -> "Normal Range"
+                                sample.stressScore <= 79 -> "Elevated"
                                 else -> "High"
                             }
                             val tagColor = when {
@@ -1525,9 +1505,9 @@ fun StressDayTimelineCard(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(ShapeSmall)
                                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    .padding(horizontal = Spacing.md, vertical = Spacing.sm),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {

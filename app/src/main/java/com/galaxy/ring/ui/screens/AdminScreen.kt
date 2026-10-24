@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -66,6 +68,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -79,6 +82,9 @@ import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
 import com.galaxy.ring.ui.theme.NeonEmerald
 import com.galaxy.ring.ui.theme.RosePulse
+import com.galaxy.ring.ui.theme.ShapeMedium
+import com.galaxy.ring.ui.theme.ShapeSmall
+import com.galaxy.ring.ui.theme.Spacing
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -167,13 +173,23 @@ fun AdminScreen(
                             ).show()
                         }
                     },
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 48.dp)
+                        .testTag("admin_dedup_confirm_button"),
+                    shape = ShapeSmall,
                     colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
                 ) {
                     Text("Deduplicate", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                OutlinedButton(onClick = { showDeduplicateDialog = false }) {
+                OutlinedButton(
+                    onClick = { showDeduplicateDialog = false },
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 48.dp)
+                        .testTag("admin_dedup_cancel_button"),
+                    shape = ShapeSmall
+                ) {
                     Text("Cancel")
                 }
             }
@@ -212,13 +228,23 @@ fun AdminScreen(
                             Toast.makeText(context, "Local Room database history cleared", Toast.LENGTH_LONG).show()
                         }
                     },
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 48.dp)
+                        .testTag("admin_clear_history_confirm_button"),
+                    shape = ShapeSmall,
                     colors = ButtonDefaults.buttonColors(containerColor = RosePulse)
                 ) {
                     Text("Clear Local History", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                OutlinedButton(onClick = { showClearHistoryDialog = false }) {
+                OutlinedButton(
+                    onClick = { showClearHistoryDialog = false },
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 48.dp)
+                        .testTag("admin_clear_history_cancel_button"),
+                    shape = ShapeSmall
+                ) {
                     Text("Cancel")
                 }
             }
@@ -236,7 +262,7 @@ fun AdminScreen(
                             tint = CyberCyan,
                             modifier = Modifier.size(22.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(Spacing.sm))
                         Text(
                             text = "Admin / Debug Panel",
                             style = MaterialTheme.typography.titleMedium,
@@ -246,7 +272,12 @@ fun AdminScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(
+                        onClick = onNavigateBack,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("admin_back_button")
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
@@ -255,18 +286,28 @@ fun AdminScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        Toast.makeText(context, "Log buffer active (${allLogs.size} lines)", Toast.LENGTH_SHORT).show()
-                    }) {
+                    IconButton(
+                        onClick = {
+                            Toast.makeText(context, "Log buffer active (${allLogs.size} lines)", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("admin_refresh_button")
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Refresh",
                             tint = CyberCyan
                         )
                     }
-                    IconButton(onClick = {
-                        exportAndShareLogs(context, connDesc, bleRepo)
-                    }) {
+                    IconButton(
+                        onClick = {
+                            exportAndShareLogs(context, connDesc, bleRepo)
+                        },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("admin_share_button")
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Share,
                             contentDescription = "Export & Share",
@@ -285,8 +326,8 @@ fun AdminScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(horizontal = Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
             item { Spacer(modifier = Modifier.height(2.dp)) }
 
@@ -294,17 +335,18 @@ fun AdminScreen(
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
+                    shape = ShapeMedium,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(Spacing.lg)) {
                         Text(
                             text = "1. Connection Status",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = CyberCyan
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(Spacing.sm))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -324,7 +366,7 @@ fun AdminScreen(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(Spacing.xxs))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -343,7 +385,7 @@ fun AdminScreen(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(Spacing.xxs))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -362,7 +404,7 @@ fun AdminScreen(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(Spacing.xxs))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -381,7 +423,7 @@ fun AdminScreen(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(Spacing.xxs))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -400,7 +442,7 @@ fun AdminScreen(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(Spacing.xxs))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -420,7 +462,7 @@ fun AdminScreen(
                         }
 
                         if (bleManager.lastFailedInitStep != null) {
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(Spacing.xxs))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
@@ -446,17 +488,18 @@ fun AdminScreen(
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
+                    shape = ShapeMedium,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(Spacing.lg)) {
                         Text(
                             text = "2. GATT Discovery Summary",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = CyberCyan
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(Spacing.sm))
 
                         GattRow(
                             label = "Service 0xA00A found",
@@ -486,17 +529,18 @@ fun AdminScreen(
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
+                    shape = ShapeMedium,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(Spacing.lg)) {
                         Text(
                             text = "3. Last Measurement Result",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = CyberCyan
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(Spacing.sm))
 
                         val resultText = when (val m = measurementState) {
                             is ManualMeasurementState.Success -> "${m.metric}: ${m.displayValue} (Success)"
@@ -515,7 +559,7 @@ fun AdminScreen(
                             color = if (isErr) RosePulse else if (isSucc) NeonEmerald else MaterialTheme.colorScheme.onSurface
                         )
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(Spacing.sm))
 
                         // Short TX / RX snippet
                         val txSnippet = AppLog.lastTxHex ?: "(None)"
@@ -524,9 +568,9 @@ fun AdminScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(ShapeSmall)
                                 .background(MaterialTheme.colorScheme.background)
-                                .padding(10.dp)
+                                .padding(Spacing.sm)
                         ) {
                             Text(
                                 text = "TX: $txSnippet",
@@ -534,7 +578,7 @@ fun AdminScreen(
                                 fontFamily = FontFamily.Monospace,
                                 color = CyberCyan
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(Spacing.xxs))
                             Text(
                                 text = "RX: $rxSnippet",
                                 style = MaterialTheme.typography.labelSmall,
@@ -543,17 +587,20 @@ fun AdminScreen(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(Spacing.sm))
 
                         OutlinedButton(
                             onClick = {
                                 copyToClipboard(context, "Last TX/RX", AppLog.getLastTxRxSnippet())
                             },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .defaultMinSize(minHeight = 48.dp)
+                                .testTag("admin_copy_last_tx_rx_button"),
+                            shape = ShapeSmall
                         ) {
                             Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(Spacing.sm))
                             Text("Copy Last TX/RX Only", style = MaterialTheme.typography.labelMedium)
                         }
                     }
@@ -564,10 +611,11 @@ fun AdminScreen(
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
+                    shape = ShapeMedium,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(Spacing.lg)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -585,7 +633,7 @@ fun AdminScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(Spacing.sm))
 
                         val recentTx = allTxRecords.takeLast(20).asReversed()
                         if (recentTx.isEmpty()) {
@@ -606,9 +654,9 @@ fun AdminScreen(
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(8.dp))
+                                            .clip(ShapeSmall)
                                             .background(MaterialTheme.colorScheme.background)
-                                            .padding(8.dp)
+                                            .padding(Spacing.sm)
                                     ) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
@@ -645,18 +693,21 @@ fun AdminScreen(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(Spacing.sm))
 
                             OutlinedButton(
                                 onClick = {
                                     val fullTxText = recentTx.joinToString("\n") { it.toLineString() }
                                     copyToClipboard(context, "Last 20 TX Hex", fullTxText)
                                 },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(10.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("admin_copy_last_20_tx_button"),
+                                shape = ShapeSmall
                             ) {
                                 Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(Spacing.sm))
                                 Text("Copy Last 20 TX Hex", style = MaterialTheme.typography.labelMedium)
                             }
                         }
@@ -668,21 +719,22 @@ fun AdminScreen(
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
+                    shape = ShapeMedium,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(Spacing.lg)) {
                         Text(
                             text = "Actions",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = CyberCyan
                         )
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(Spacing.sm))
 
                         FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Button(
@@ -690,7 +742,10 @@ fun AdminScreen(
                                     val full = AppLog.getAllLogsText()
                                     copyToClipboard(context, "Galaxy Ring Logs", full)
                                 },
-                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("admin_copy_all_logs_button"),
+                                shape = ShapeSmall,
                                 colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
                             ) {
                                 Icon(
@@ -699,7 +754,7 @@ fun AdminScreen(
                                     tint = Color(0xFF0F172A),
                                     modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(Spacing.sm))
                                 Text("Copy All Logs", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
                             }
 
@@ -707,7 +762,10 @@ fun AdminScreen(
                                 onClick = {
                                     exportAndShareLogs(context, connDesc, bleRepo)
                                 },
-                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("admin_export_share_logs_button"),
+                                shape = ShapeSmall,
                                 colors = ButtonDefaults.buttonColors(containerColor = ElectricViolet)
                             ) {
                                 Icon(
@@ -716,7 +774,7 @@ fun AdminScreen(
                                     tint = Color.White,
                                     modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(Spacing.sm))
                                 Text("Export / Share Logs", color = Color.White, fontWeight = FontWeight.Bold)
                             }
 
@@ -725,14 +783,17 @@ fun AdminScreen(
                                     AppLog.clear()
                                     Toast.makeText(context, "Log buffer cleared", Toast.LENGTH_SHORT).show()
                                 },
-                                shape = RoundedCornerShape(10.dp)
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("admin_clear_logs_button"),
+                                shape = ShapeSmall
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.ClearAll,
                                     contentDescription = null,
                                     modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(Spacing.sm))
                                 Text("Clear Logs")
                             }
 
@@ -740,7 +801,10 @@ fun AdminScreen(
                                 onClick = {
                                     showDeduplicateDialog = true
                                 },
-                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("admin_deduplicate_history_button"),
+                                shape = ShapeSmall,
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = CyberCyan)
                             ) {
                                 Icon(
@@ -748,7 +812,7 @@ fun AdminScreen(
                                     contentDescription = null,
                                     modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(Spacing.sm))
                                 Text("Deduplicate History")
                             }
 
@@ -756,7 +820,10 @@ fun AdminScreen(
                                 onClick = {
                                     showClearHistoryDialog = true
                                 },
-                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("admin_clear_history_button"),
+                                shape = ShapeSmall,
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = RosePulse)
                             ) {
                                 Icon(
@@ -764,7 +831,7 @@ fun AdminScreen(
                                     contentDescription = null,
                                     modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(Spacing.sm))
                                 Text("Clear Local History")
                             }
                         }
@@ -776,10 +843,11 @@ fun AdminScreen(
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
+                    shape = ShapeMedium,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(Spacing.lg)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -798,14 +866,14 @@ fun AdminScreen(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(Spacing.sm))
 
                         // Filter Chips
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                         ) {
                             val filters = listOf("All", "BLE", "Sync", "Sleep", "Error")
                             filters.forEach { f ->
@@ -814,6 +882,9 @@ fun AdminScreen(
                                     selected = isSelected,
                                     onClick = { selectedFilter = f },
                                     label = { Text(f) },
+                                    modifier = Modifier
+                                        .defaultMinSize(minHeight = 48.dp)
+                                        .testTag("admin_filter_chip_${f.lowercase()}"),
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = CyberCyan,
                                         selectedLabelColor = Color(0xFF0F172A)
@@ -905,9 +976,9 @@ fun LogEntryRow(entry: LogEntry) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(ShapeSmall)
             .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
     ) {
         Column {
             Row(
