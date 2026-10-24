@@ -119,10 +119,12 @@ import com.galaxy.ring.data.SleepSession
 import com.galaxy.ring.data.SleepStage
 import com.galaxy.ring.data.StressSample
 import com.galaxy.ring.data.SyncStatus
+import com.galaxy.ring.ui.components.EmptyState
+import com.galaxy.ring.ui.components.MetricCard
+import com.galaxy.ring.ui.components.SectionHeader
+import com.galaxy.ring.ui.components.StatPill
 import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
-import com.galaxy.ring.ui.theme.EmptyState
-import com.galaxy.ring.ui.theme.MetricCard
 import com.galaxy.ring.ui.theme.NeonEmerald
 import com.galaxy.ring.ui.theme.RosePulse
 import kotlinx.coroutines.launch
@@ -215,8 +217,7 @@ fun MainScreen(
                         bleRepo.startScan()
                         showScanSheet = true
                     }
-                },
-                onAdminClick = { showAdminScreen = true }
+                }
             )
         },
         bottomBar = {
@@ -310,8 +311,7 @@ fun MainScreen(
                         onOpenRationale = onOpenRationale,
                         onNavigateToSleep = { selectedTab = 1 },
                         onNavigateToHeart = { selectedTab = 2 },
-                        onNavigateToActivity = { selectedTab = 3 },
-                        onOpenAdmin = { showAdminScreen = true }
+                        onNavigateToActivity = { selectedTab = 3 }
                     )
                 }
                 1 -> {
@@ -406,8 +406,7 @@ fun DeviceDashboard(
     onOpenRationale: () -> Unit,
     onNavigateToSleep: () -> Unit,
     onNavigateToHeart: () -> Unit = {},
-    onNavigateToActivity: () -> Unit = {},
-    onOpenAdmin: () -> Unit = {}
+    onNavigateToActivity: () -> Unit = {}
 ) {
     val app = GalaxyRingApp.instance
     val repo = app.healthRepository
@@ -439,7 +438,15 @@ fun DeviceDashboard(
             )
         }
 
-        // 2. Steps Card
+        // 2. Section Header
+        item {
+            SectionHeader(
+                title = "Today's Summary",
+                subtitle = "Biometric readings synced from Galaxy Ring"
+            )
+        }
+
+        // 3. Steps Card
         item {
             val stepCount = todayStepsEntity?.steps ?: snapshot.steps.totalSteps
             val calories = todayStepsEntity?.caloriesKcal ?: snapshot.steps.caloriesKcal
@@ -731,7 +738,7 @@ fun ConnectionStatusBanner(
                     Color(0xFFF59E0B).copy(alpha = 0.15f),
                     Color(0xFFF59E0B),
                     Icons.Default.Error,
-                    "Connected but 0 RX from ring. Commands may be ignored. Open Admin logs."
+                    "Connected. Awaiting data from ring."
                 )
             } else {
                 Quadruple(
@@ -787,9 +794,7 @@ fun ConnectionStatusBanner(
     }
 
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = isZeroRxReady) { onOpenAdmin() },
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = bgColor)
     ) {
@@ -962,13 +967,11 @@ fun ManualMeasurementsCard(
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "→ View TX/RX hex & export logs in Admin / Debug",
+                        text = "System diagnostics available in More → Settings",
                         style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = CyberCyan,
-                        modifier = Modifier
-                            .clickable { onOpenAdmin() }
-                            .padding(start = 26.dp)
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 26.dp)
                     )
                 }
                 Spacer(modifier = Modifier.height(14.dp))
@@ -1262,7 +1265,7 @@ fun Spo2Card(
                     Spacer(modifier = Modifier.weight(1f))
                     val isOptimal = spo2Val >= 95f
                     Text(
-                        text = if (isOptimal) "Optimal Oxygenation" else "Sub-optimal",
+                        text = if (isOptimal) "Normal Range" else "Below Normal",
                         style = MaterialTheme.typography.labelMedium,
                         color = if (isOptimal) NeonEmerald else Color(0xFFF59E0B),
                         modifier = Modifier
@@ -1370,9 +1373,9 @@ fun HrvCard(
                     )
                     Spacer(modifier = Modifier.weight(1f))
                     val statusLabel = when {
-                        hrvVal >= 50 -> "High Recovery"
-                        hrvVal >= 30 -> "Normal"
-                        else -> "Elevated Fatigue"
+                        hrvVal >= 50 -> "High Variability"
+                        hrvVal >= 30 -> "Moderate Variability"
+                        else -> "Low Variability"
                     }
                     val statusColor = when {
                         hrvVal >= 50 -> NeonEmerald
@@ -1555,12 +1558,7 @@ fun GalaxyRingTopBar(
     TopAppBar(
         title = {
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.pointerInput(Unit) {
-                    detectTapGestures(
-                        onLongPress = { onAdminClick() }
-                    )
-                }
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
                     modifier = Modifier
@@ -2170,7 +2168,7 @@ fun HeartRateCard(
                     )
                     Spacer(modifier = Modifier.weight(1f))
                     Text(
-                        text = "Zone: Resting",
+                        text = "Resting",
                         style = MaterialTheme.typography.labelMedium,
                         color = NeonEmerald,
                         modifier = Modifier

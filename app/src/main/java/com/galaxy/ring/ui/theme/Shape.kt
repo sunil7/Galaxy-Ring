@@ -12,6 +12,10 @@ val CornerRadiusSmall: Dp = 12.dp
 val CornerRadiusMedium: Dp = 16.dp
 val CornerRadiusLarge: Dp = 24.dp
 
+val ShapeSmall: RoundedCornerShape = RoundedCornerShape(CornerRadiusSmall)
+val ShapeMedium: RoundedCornerShape = RoundedCornerShape(CornerRadiusMedium)
+val ShapeLarge: RoundedCornerShape = RoundedCornerShape(CornerRadiusLarge)
+
 /**
  * Material 3 Shapes specification with 12, 16, and 24 dp corner sizes.
  */
@@ -27,6 +31,13 @@ val Shapes: Shapes = Shapes(
  * Application spacing scale with 4, 8, 12, 16, and 24 dp tokens.
  */
 object Spacing {
+    val xxs: Dp = 4.dp
+    val xs: Dp = 4.dp
+    val sm: Dp = 8.dp
+    val md: Dp = 12.dp
+    val lg: Dp = 16.dp
+    val xl: Dp = 24.dp
+
     val extraSmall: Dp = 4.dp
     val small: Dp = 8.dp
     val medium: Dp = 12.dp

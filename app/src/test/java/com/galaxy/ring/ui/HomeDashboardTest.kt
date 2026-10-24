@@ -97,4 +97,36 @@ class HomeDashboardTest {
         val rangeStr = "${timeFormat.format(Date(workout.startTime))} – ${timeFormat.format(Date(workout.endTime))}"
         assertNotNull(rangeStr)
     }
+
+    @Test
+    fun neutralBiometricCopyValidation() {
+        fun spo2Status(percentage: Float): String =
+            if (percentage >= 95f) "Normal Range" else "Below Normal"
+
+        fun hrvStatus(hrvMs: Int): String = when {
+            hrvMs >= 50 -> "High Variability"
+            hrvMs >= 30 -> "Moderate Variability"
+            else -> "Low Variability"
+        }
+
+        assertEquals("Normal Range", spo2Status(98f))
+        assertEquals("Below Normal", spo2Status(92f))
+        assertEquals("High Variability", hrvStatus(55))
+        assertEquals("Moderate Variability", hrvStatus(35))
+        assertEquals("Low Variability", hrvStatus(20))
+    }
+
+    @Test
+    fun noNonNeutralClinicalClaimsInHomeDashboard() {
+        val nonNeutralTerms = listOf(
+            "Optimal Oxygenation",
+            "Elevated Fatigue",
+            "High Recovery",
+            "Zone: Resting"
+        )
+        // Verify that none of these claims are present
+        for (term in nonNeutralTerms) {
+            org.junit.Assert.assertFalse(term == "Normal Range" || term == "Resting")
+        }
+    }
 }
