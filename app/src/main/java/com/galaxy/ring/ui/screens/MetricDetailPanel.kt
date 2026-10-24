@@ -23,6 +23,7 @@ import com.galaxy.ring.data.MetricPoint
 import com.galaxy.ring.data.MetricStats
 import com.galaxy.ring.data.MonitoringSchedule
 import com.galaxy.ring.data.SleepRecordParser
+import com.galaxy.ring.ui.components.EmptyState
 import java.util.Calendar
 
 private fun startOfDay(timestamp: Long): Long = Calendar.getInstance().apply {
@@ -94,7 +95,13 @@ fun MetricDetailPanel(
         Spacer(Modifier.height(12.dp))
 
         if (sorted.isEmpty() || stats == null) {
-            Text("No readings for this day.", style = MaterialTheme.typography.bodyMedium)
+            EmptyState(
+                message = "No readings for this day.",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                testTag = "metric_empty_state"
+            )
             return@Column
         }
 
@@ -159,8 +166,21 @@ fun MetricDetailPanel(
 @Composable
 private fun StatCell(label: String, value: String, unit: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, style = MaterialTheme.typography.labelMedium)
-        Text(value, style = MaterialTheme.typography.titleLarge)
-        Text(unit, style = MaterialTheme.typography.labelSmall)
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = unit,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
