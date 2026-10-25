@@ -123,7 +123,8 @@ class HomeDashboardTest {
             "Sub-optimal",
             "Elevated Fatigue",
             "High Recovery",
-            "Zone: Resting"
+            "Zone: Resting",
+            "Resting PPG"
         )
         // Verify that none of these claims are present
         for (term in nonNeutralTerms) {
