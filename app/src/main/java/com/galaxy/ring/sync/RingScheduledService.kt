@@ -108,9 +108,10 @@ class RingScheduledService : Service() {
                     break
                 }
 
-                // If disconnected and last address known, keep connection alive
+                // If disconnected and last address known, keep connection alive.
+                // Respect a user-initiated disconnect: do not auto-reconnect for the rest of the session.
                 val connState = bleRepo.connectionState.value
-                if (connState is ConnectionState.Disconnected) {
+                if (connState is ConnectionState.Disconnected && !bleRepo.isUserDisconnected) {
                     val lastAddr = repo.lastConnectedAddress
                     if (lastAddr != null) {
                         AppLog.i(tag, "FGS keep-alive: ring is disconnected, auto-connecting to $lastAddr...")
