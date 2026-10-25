@@ -351,6 +351,7 @@ fun MainScreen(
                 }
                 4 -> {
                     // More (Settings & Ring Config)
+                    // Only entry point to the Admin screen: "Open Admin Panel" in Settings.
                     SettingsScreen(
                         onOpenHealthRationale = onOpenRationale,
                         hasHealthPermissions = hasHealthPermissions,
@@ -1150,7 +1151,7 @@ fun SleepGoalProgressRingCard(
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = "Quality score: ${sleep?.qualityScore ?: 0}/100 • Restorative sleep",
+                        text = "Quality score: ${sleep?.qualityScore ?: 0}/100",
                         style = MaterialTheme.typography.bodySmall,
                         color = ElectricViolet
                     )
@@ -1566,8 +1567,7 @@ fun StressCard(
 fun GalaxyRingTopBar(
     connectionState: ConnectionState,
     snapshot: RingHealthSnapshot,
-    onScanClick: () -> Unit,
-    onAdminClick: () -> Unit = {}
+    onScanClick: () -> Unit
 ) {
     TopAppBar(
         title = {
@@ -2157,7 +2157,7 @@ fun HeartRateCard(
                     )
                 }
                 Text(
-                    text = if (hasHr) "Resting PPG" else "No Data",
+                    text = if (hasHr) "Latest reading" else "No Data",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -2182,7 +2182,7 @@ fun HeartRateCard(
                     )
                     Spacer(modifier = Modifier.weight(1f))
                     Text(
-                        text = "Resting",
+                        text = "Latest reading",
                         style = MaterialTheme.typography.labelMedium,
                         color = NeonEmerald,
                         modifier = Modifier
@@ -2424,7 +2424,7 @@ fun BatteryCard(battery: com.galaxy.ring.data.RingBattery) {
                 } else if (battery.isCharging) {
                     "Charging now"
                 } else {
-                    "~${battery.estimatedDaysLeft.toInt()} days left"
+                    "Not charging"
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = if (hasBattery) NeonEmerald else MaterialTheme.colorScheme.onSurfaceVariant

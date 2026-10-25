@@ -81,6 +81,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** SpO₂ readings below this value are marked on the workout chart. */
+private const val WORKOUT_SPO2_MARK_BELOW = 90f
+
+/** Amber used for below-threshold SpO₂ markers and notes. */
+private val WorkoutSpo2AlertColor = Color(0xFFF59E0B)
+
 /**
  * Activity Detail Screen (F6):
  *  - Top bar with back to day list navigation
@@ -647,17 +653,17 @@ fun WorkoutPhaseListCard(
                             modifier = Modifier.weight(1f)
                         )
 
-                        // Distance
+                        // Distance (null = not reported by ring; show placeholder, never a default)
                         Text(
-                            text = WorkoutFormatter.formatDistance(phase.distanceMeters, useMiles),
+                            text = phase.distanceMeters?.let { WorkoutFormatter.formatDistance(it, useMiles) } ?: "—",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f)
                         )
 
-                        // Steps
+                        // Steps (null = not reported by ring; show placeholder, never 0)
                         Text(
-                            text = "${phase.steps}",
+                            text = phase.steps?.toString() ?: "—",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -815,7 +821,9 @@ fun WorkoutHrChartCard(
 }
 
 /**
- * SpO2 Chart Card during workout window
+ * SpO2 Chart Card during workout window.
+ * Axis lower bound is computed from the data: min(90, data minimum) − 2. Upper bound is 100.
+ * Readings below 90% are drawn at their real height with an amber ring and listed in a note.
  */
 @Composable
 fun WorkoutSpo2ChartCard(
@@ -858,6 +866,8 @@ fun WorkoutSpo2ChartCard(
             val endTime = points.last().timestamp.coerceAtLeast(session.endTime)
             val timeSpan = (endTime - startTime).coerceAtLeast(60_000L)
 
+            val belowCount = points.count { it.value < WORKOUT_SPO2_MARK_BELOW }
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -878,7 +888,7 @@ fun WorkoutSpo2ChartCard(
                 // Canvas line chart
                 val lineColor = CyberCyan
                 val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
-                val minVal = 90f
+                val minVal = spo2AxisMin(points.map { it.value })
                 val maxVal = 100f
 
                 Canvas(
@@ -906,8 +916,27 @@ fun WorkoutSpo2ChartCard(
                     drawPath(path, lineColor, style = Stroke(width = 3f))
 
                     for (p in points) {
-                        drawCircle(lineColor, radius = 4f, center = Offset(xOf(p.timestamp), yOf(p.value)))
+                        val center = Offset(xOf(p.timestamp), yOf(p.value))
+                        if (p.value < WORKOUT_SPO2_MARK_BELOW) {
+                            drawCircle(
+                                color = WorkoutSpo2AlertColor,
+                                radius = 7.dp.toPx(),
+                                center = center,
+                                style = Stroke(width = 2.dp.toPx())
+                            )
+                        }
+                        drawCircle(lineColor, radius = 4f, center = center)
                     }
+                }
+
+                if (belowCount > 0) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "$belowCount reading(s) below 90% are marked in amber.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = WorkoutSpo2AlertColor,
+                        modifier = Modifier.testTag("workout_spo2_below_90_note")
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))
@@ -947,7 +976,7 @@ fun WorkoutSpo2ChartCard(
                             text = "${pt.value.toInt()}%",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold,
-                            color = CyberCyan
+                            color = if (pt.value < WORKOUT_SPO2_MARK_BELOW) WorkoutSpo2AlertColor else CyberCyan
                         )
                     }
                 }

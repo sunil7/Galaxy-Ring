@@ -73,6 +73,7 @@ import com.galaxy.ring.data.MonitoringSchedule
 import com.galaxy.ring.data.MonitoringSettings
 import com.galaxy.ring.data.ScreenBrightness
 import com.galaxy.ring.sync.RingScheduledService
+import com.galaxy.ring.ui.applyMonitoringChange
 import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
 import com.galaxy.ring.ui.theme.NeonEmerald
@@ -128,23 +129,10 @@ fun SettingsScreen(
         }
     }
 
+    // Single shared path for pushing monitoring changes to the scheduler (A2-P2.5).
+    // HeartScreen calls the same helper, so both screens produce the same service state.
     fun updateMonitoringService() {
-        val anyEnabled = hrConfig.enabled || spo2Config.enabled || hrvConfig.enabled || stressConfig.enabled
-        repo.isScheduleEnabled = anyEnabled
-        repo.scheduleCheckHeartRate = hrConfig.enabled
-        repo.scheduleCheckSpo2 = spo2Config.enabled
-        val shortest = MonitoringSchedule.shortestIntervalMin(monitoringSettings.allConfigs())
-        if (shortest != null) {
-            repo.scheduleIntervalMinutes = shortest
-        }
-        if (anyEnabled) {
-            checkAndPromptBatteryOptimization()
-            RingScheduledService.start(context)
-        } else {
-            if (!isKeepConnected) {
-                RingScheduledService.stop(context)
-            }
-        }
+        applyMonitoringChange(context) { checkAndPromptBatteryOptimization() }
     }
 
     if (showBatteryPromptDialog) {

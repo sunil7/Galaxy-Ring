@@ -43,6 +43,7 @@ import com.galaxy.ring.data.HrvEntity
 import com.galaxy.ring.data.MonitorMetric
 import com.galaxy.ring.data.MonitoringSettings
 import com.galaxy.ring.data.toMetricPoint
+import com.galaxy.ring.ui.applyMonitoringChange
 import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.DarkCardBorder
 import com.galaxy.ring.ui.theme.DarkSurface
@@ -168,10 +169,12 @@ fun HeartScreen(
                     onMonitoringEnabledChange = { enabled ->
                         settings.setEnabled(MonitorMetric.HEART_RATE, enabled)
                         hrConfig = settings.config(MonitorMetric.HEART_RATE)
+                        applyMonitoringChange(app)
                     },
                     onIntervalChange = { interval ->
                         settings.setIntervalMin(MonitorMetric.HEART_RATE, interval)
                         hrConfig = settings.config(MonitorMetric.HEART_RATE)
+                        applyMonitoringChange(app)
                     },
                     valueFormat = { it.toInt().toString() }
                 )
@@ -200,10 +203,12 @@ fun HeartScreen(
                     onMonitoringEnabledChange = { enabled ->
                         settings.setEnabled(MonitorMetric.HRV, enabled)
                         hrvConfig = settings.config(MonitorMetric.HRV)
+                        applyMonitoringChange(app)
                     },
                     onIntervalChange = { interval ->
                         settings.setIntervalMin(MonitorMetric.HRV, interval)
                         hrvConfig = settings.config(MonitorMetric.HRV)
+                        applyMonitoringChange(app)
                     },
                     valueFormat = { it.toInt().toString() }
                 )

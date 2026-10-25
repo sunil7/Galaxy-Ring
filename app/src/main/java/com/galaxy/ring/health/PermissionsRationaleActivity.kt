@@ -145,7 +145,7 @@ fun PermissionsRationaleContent(
                 RationaleCard(
                     icon = Icons.Default.Thermostat,
                     title = "Skin Temperature",
-                    description = "Monitors baseline skin temperature variations during rest."
+                    description = "Stores skin temperature readings recorded by the ring."
                 )
             }
 

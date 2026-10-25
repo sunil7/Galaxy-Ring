@@ -91,6 +91,21 @@ import java.util.Locale
 
 private const val TAG = "GalaxyRingHistory"
 
+/** Readings below this value are marked on SpO₂ charts. Used for marking only, not for axis bounds. */
+private const val SPO2_MARK_BELOW = 90f
+
+/** Amber used for below-threshold SpO₂ markers and notes. */
+private val Spo2AlertColor = Color(0xFFF59E0B)
+
+/**
+ * SpO₂ axis lower bound computed from data: min(90, data minimum) − 2.
+ * Upper bound is always 100. Input must already be filtered to valid readings (70..100).
+ */
+internal fun spo2AxisMin(validValues: List<Float>): Float {
+    val dataMin = validValues.minOrNull() ?: SPO2_MARK_BELOW
+    return minOf(SPO2_MARK_BELOW, dataMin) - 2f
+}
+
 @Composable
 fun HistoryScreen(
     onNavigateBack: (() -> Unit)? = null,
@@ -525,24 +540,40 @@ fun Spo2DayTimelineCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceAround
                 ) {
-                    MetricPill(label = "Min", value = "$minSpo2", unit = "%", color = if (minSpo2 < 90) RosePulse else CyberCyan)
+                    MetricPill(label = "Min", value = "$minSpo2", unit = "%", color = if (minSpo2 < SPO2_MARK_BELOW) RosePulse else CyberCyan)
                     MetricPill(label = "Avg", value = "$avgSpo2", unit = "%", color = NeonEmerald)
                     MetricPill(label = "Max", value = "$maxSpo2", unit = "%", color = ElectricViolet)
                 }
 
                 Spacer(modifier = Modifier.height(Spacing.lg))
 
-                // 24h Line Chart Canvas (85% - 100%)
+                // Chart uses only plausible readings (70–100%). Axis is computed from the data.
+                val chartSamples = samples.filter { it.percentage in 70f..100f }
+                val axisMin = spo2AxisMin(chartSamples.map { it.percentage })
+                val belowCount = chartSamples.count { it.percentage < SPO2_MARK_BELOW }
+
+                // 24h Line Chart Canvas (data-driven lower bound, upper bound 100%)
                 Day24hLineChart(
-                    samples = samples.map { ChartPoint(timestamp = it.timestamp, value = it.percentage) },
+                    samples = chartSamples.map { ChartPoint(timestamp = it.timestamp, value = it.percentage) },
                     scheduleIntervalMinutes = scheduleIntervalMinutes,
                     selectedCalendar = selectedCalendar,
-                    minValue = 85f,
+                    minValue = axisMin,
                     maxValue = 100f,
                     unit = "%",
                     lineColor = CyberCyan,
-                    guidelineValues = listOf(90f, 95f, 100f)
+                    guidelineValues = listOf(90f, 95f, 100f).filter { it >= axisMin },
+                    highlightBelow = SPO2_MARK_BELOW
                 )
+
+                if (belowCount > 0) {
+                    Spacer(modifier = Modifier.height(Spacing.xs))
+                    Text(
+                        text = "$belowCount reading(s) below 90% are marked in amber.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Spo2AlertColor,
+                        modifier = Modifier.testTag("history_spo2_below_90_note")
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(Spacing.md))
 
@@ -604,6 +635,7 @@ data class TimelineSample(val timestamp: Long, val valueDisplay: String, val met
 
 /**
  * 24-hour Canvas Line Chart with day period shading, ideal slot ticks, and gap markers.
+ * highlightBelow: when set, points with value below this threshold get an amber ring.
  */
 @Composable
 fun Day24hLineChart(
@@ -614,7 +646,8 @@ fun Day24hLineChart(
     maxValue: Float,
     unit: String,
     lineColor: Color,
-    guidelineValues: List<Float>
+    guidelineValues: List<Float>,
+    highlightBelow: Float? = null
 ) {
     val dayCal = (selectedCalendar.clone() as Calendar).apply {
         set(Calendar.HOUR_OF_DAY, 0)
@@ -737,8 +770,8 @@ fun Day24hLineChart(
                         }
                     }
 
-                    // Draw sample dots
-                    points.forEach { pt ->
+                    // Draw sample dots (and threshold markers when requested)
+                    points.forEachIndexed { idx, pt ->
                         drawCircle(
                             color = Color(0xFF0F172A),
                             radius = 4.5.dp.toPx(),
@@ -749,6 +782,15 @@ fun Day24hLineChart(
                             radius = 3.dp.toPx(),
                             center = pt
                         )
+                        val threshold = highlightBelow
+                        if (threshold != null && sorted[idx].value < threshold) {
+                            drawCircle(
+                                color = Spo2AlertColor,
+                                radius = 7.dp.toPx(),
+                                center = pt,
+                                style = Stroke(width = 2.dp.toPx())
+                            )
+                        }
                     }
                 }
             }
@@ -1530,4 +1572,3 @@ fun StressDayTimelineCard(
         }
     }
 }
-
