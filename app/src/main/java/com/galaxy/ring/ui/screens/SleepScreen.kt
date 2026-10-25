@@ -262,7 +262,7 @@ fun SleepScreen(
                             },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = CyberCyan,
-                                selectedLabelColor = Color(0xFF0F172A)
+                                selectedLabelColor = MaterialTheme.colorScheme.background
                             )
                         )
                     }
@@ -334,15 +334,15 @@ fun SleepScreen(
                                     if (isSyncing) {
                                         CircularProgressIndicator(
                                             modifier = Modifier.size(16.dp),
-                                            color = Color(0xFF0F172A),
+                                            color = MaterialTheme.colorScheme.background,
                                             strokeWidth = 2.dp
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text(syncProgressText ?: "Syncing...", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                                        Text(syncProgressText ?: "Syncing...", color = MaterialTheme.colorScheme.background, fontWeight = FontWeight.Bold)
                                     } else {
-                                        Icon(imageVector = Icons.Default.Sync, contentDescription = null, tint = Color(0xFF0F172A), modifier = Modifier.size(16.dp))
+                                        Icon(imageVector = Icons.Default.Sync, contentDescription = null, tint = MaterialTheme.colorScheme.background, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Sync from ring", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                                        Text("Sync from ring", color = MaterialTheme.colorScheme.background, fontWeight = FontWeight.Bold)
                                     }
                                 }
                                 Spacer(modifier = Modifier.height(10.dp))
@@ -619,7 +619,7 @@ fun RicherSleepMetricsGrid(analysis: com.galaxy.ring.data.SleepAnalysis) {
                             text = "±${stdDev.roundToInt()}m",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
-                            color = if (stdDev < 30) NeonEmerald else Color(0xFFF59E0B)
+                            color = if (stdDev < 30) NeonEmerald else MaterialTheme.colorScheme.tertiary
                         )
                         Text(
                             text = if (stdDev < 30) "Consistent schedule (7d)" else "Variable schedule (7d)",
@@ -681,7 +681,7 @@ fun RicherSleepMetricsGrid(analysis: com.galaxy.ring.data.SleepAnalysis) {
                     Text(
                         text = if (analysis.awakeningsCount <= 2) "Low night disruption" else "Frequent wake periods",
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (analysis.awakeningsCount <= 2) NeonEmerald else Color(0xFFF59E0B)
+                        color = if (analysis.awakeningsCount <= 2) NeonEmerald else MaterialTheme.colorScheme.tertiary
                     )
                 }
             }
@@ -701,7 +701,7 @@ fun RicherSleepMetricsGrid(analysis: com.galaxy.ring.data.SleepAnalysis) {
                         text = diffStr,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = if (diffMins >= -30) NeonEmerald else Color(0xFFF59E0B)
+                        color = if (diffMins >= -30) NeonEmerald else MaterialTheme.colorScheme.tertiary
                     )
                     Text(
                         text = "Total: ${analysis.timeAsleepMinutes / 60}h ${analysis.timeAsleepMinutes % 60}m",
@@ -844,7 +844,7 @@ fun OvernightBreathingIndicatorsCard(
 
     val (badgeBg, badgeText, badgeColor) = when (report.riskBand) {
         SleepApneaScreener.ApneaRiskBand.LOW -> Triple(NeonEmerald.copy(alpha = 0.15f), "Typical Variation", NeonEmerald)
-        SleepApneaScreener.ApneaRiskBand.MODERATE -> Triple(Color(0xFFF59E0B).copy(alpha = 0.15f), "Moderate Variation", Color(0xFFF59E0B))
+        SleepApneaScreener.ApneaRiskBand.MODERATE -> Triple(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f), "Moderate Variation", MaterialTheme.colorScheme.tertiary)
         SleepApneaScreener.ApneaRiskBand.ELEVATED -> Triple(RosePulse.copy(alpha = 0.15f), "Higher Variation", RosePulse)
         SleepApneaScreener.ApneaRiskBand.INSUFFICIENT_DATA -> Triple(MaterialTheme.colorScheme.surfaceVariant, "Insufficient SpO₂ Data", MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -1085,6 +1085,13 @@ fun WeekSleepOverviewCard(
     recentSessions: List<SleepSessionEntity>,
     targetHours: Float
 ) {
+    // Theme roles for the chart colours. Hoisted here because Canvas lambdas are not composable.
+    val chartBackground = MaterialTheme.colorScheme.background
+    val amberColor = MaterialTheme.colorScheme.tertiary
+    val deepColor = MaterialTheme.colorScheme.primary
+    val remColor = MaterialTheme.colorScheme.secondary
+    val lightColor = MaterialTheme.colorScheme.outline
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
@@ -1171,7 +1178,7 @@ fun WeekSleepOverviewCard(
                         .fillMaxWidth()
                         .height(130.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF0F172A))
+                        .background(chartBackground)
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
@@ -1190,7 +1197,7 @@ fun WeekSleepOverviewCard(
                             val barColor = when {
                                 s.sleepScore >= 85 -> NeonEmerald
                                 s.sleepScore >= 75 -> CyberCyan
-                                s.sleepScore >= 65 -> Color(0xFFF59E0B)
+                                s.sleepScore >= 65 -> amberColor
                                 else -> RosePulse
                             }
 
@@ -1236,7 +1243,7 @@ fun WeekSleepOverviewCard(
                         .fillMaxWidth()
                         .height(130.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF0F172A))
+                        .background(chartBackground)
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
@@ -1251,37 +1258,37 @@ fun WeekSleepOverviewCard(
                             val x = i * stepX + (stepX - barWidth) / 2f
                             var currentBottom = h - 16.dp.toPx()
 
-                            // 1. Deep (Cyan)
+                            // 1. Deep
                             val deepH = (s.deepMinutes.toFloat() / maxMins) * (h - 20.dp.toPx())
                             drawRect(
-                                color = Color(0xFF38BDF8),
+                                color = deepColor,
                                 topLeft = Offset(x, currentBottom - deepH),
                                 size = androidx.compose.ui.geometry.Size(barWidth, deepH)
                             )
                             currentBottom -= deepH
 
-                            // 2. Light (Slate)
+                            // 2. Light
                             val lightH = (s.lightMinutes.toFloat() / maxMins) * (h - 20.dp.toPx())
                             drawRect(
-                                color = Color(0xFF64748B),
+                                color = lightColor,
                                 topLeft = Offset(x, currentBottom - lightH),
                                 size = androidx.compose.ui.geometry.Size(barWidth, lightH)
                             )
                             currentBottom -= lightH
 
-                            // 3. REM (Violet)
+                            // 3. REM
                             val remH = (s.remMinutes.toFloat() / maxMins) * (h - 20.dp.toPx())
                             drawRect(
-                                color = Color(0xFFA855F7),
+                                color = remColor,
                                 topLeft = Offset(x, currentBottom - remH),
                                 size = androidx.compose.ui.geometry.Size(barWidth, remH)
                             )
                             currentBottom -= remH
 
-                            // 4. Awake (Amber)
+                            // 4. Awake
                             val awakeH = (s.awakeMinutes.toFloat() / maxMins) * (h - 20.dp.toPx())
                             drawRect(
-                                color = Color(0xFFF59E0B),
+                                color = amberColor,
                                 topLeft = Offset(x, currentBottom - awakeH),
                                 size = androidx.compose.ui.geometry.Size(barWidth, awakeH)
                             )
@@ -1312,10 +1319,10 @@ fun WeekSleepOverviewCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceAround
                 ) {
-                    ScoreLegendItem(color = Color(0xFF38BDF8), label = "Deep")
-                    ScoreLegendItem(color = Color(0xFF64748B), label = "Light")
-                    ScoreLegendItem(color = Color(0xFFA855F7), label = "REM")
-                    ScoreLegendItem(color = Color(0xFFF59E0B), label = "Awake")
+                    ScoreLegendItem(color = deepColor, label = "Deep")
+                    ScoreLegendItem(color = lightColor, label = "Light")
+                    ScoreLegendItem(color = remColor, label = "REM")
+                    ScoreLegendItem(color = amberColor, label = "Awake")
                 }
             }
         }
@@ -1369,7 +1376,7 @@ fun MonthSleepOverviewCard(
                 ) {
                     MetricPill(label = "Avg Duration", value = "${avgDur / 60}h ${avgDur % 60}m", unit = "", color = CyberCyan)
                     MetricPill(label = "Efficiency", value = "$avgEff", unit = "%", color = NeonEmerald)
-                    MetricPill(label = "Deep %", value = "$avgDeep", unit = "%", color = Color(0xFF38BDF8))
+                    MetricPill(label = "Deep %", value = "$avgDeep", unit = "%", color = MaterialTheme.colorScheme.primary)
                     MetricPill(label = "REM %", value = "$avgRem", unit = "%", color = ElectricViolet)
                 }
             }
@@ -1469,9 +1476,9 @@ fun LongTermTrendsCard(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
-                    Text(text = "Worst Week (${worstWeek.weekLabel})", style = MaterialTheme.typography.bodySmall, color = Color(0xFFF59E0B), fontWeight = FontWeight.Bold)
+                    Text(text = "Worst Week (${worstWeek.weekLabel})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "${worstWeek.avgScore} pts", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color(0xFFF59E0B))
+                    Text(text = "${worstWeek.avgScore} pts", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.tertiary)
                     Text(text = "Elevated restlessness", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -1503,7 +1510,7 @@ fun LongTermTrendsCard(
                         .fillMaxWidth()
                         .height(140.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF0F172A))
+                        .background(MaterialTheme.colorScheme.background)
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
@@ -1571,7 +1578,7 @@ fun LongTermTrendsCard(
                         .fillMaxWidth()
                         .height(140.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF0F172A))
+                        .background(MaterialTheme.colorScheme.background)
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
@@ -1721,7 +1728,7 @@ fun ManualSleepOverrideDialog(
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
             ) {
-                Text("Save Override", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                Text("Save Override", color = MaterialTheme.colorScheme.background, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
@@ -1889,7 +1896,7 @@ fun SleepCalendarView(
                                 score == null -> Color.Transparent
                                 score >= 85 -> NeonEmerald
                                 score >= 75 -> CyberCyan
-                                score >= 65 -> Color(0xFFF59E0B)
+                                score >= 65 -> MaterialTheme.colorScheme.tertiary
                                 else -> RosePulse
                             }
 
@@ -1912,7 +1919,7 @@ fun SleepCalendarView(
                                     text = "$thisDay",
                                     style = MaterialTheme.typography.bodySmall,
                                     fontWeight = if (isSelected || score != null) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) Color(0xFF0F172A) else if (score != null) scoreColor else MaterialTheme.colorScheme.onSurface
+                                    color = if (isSelected) MaterialTheme.colorScheme.background else if (score != null) scoreColor else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                             currentDay++
@@ -1930,7 +1937,7 @@ fun SleepCalendarView(
             ) {
                 ScoreLegendItem(color = NeonEmerald, label = "≥85 Optimal")
                 ScoreLegendItem(color = CyberCyan, label = "75–84 Good")
-                ScoreLegendItem(color = Color(0xFFF59E0B), label = "65–74 Fair")
+                ScoreLegendItem(color = MaterialTheme.colorScheme.tertiary, label = "65–74 Fair")
                 ScoreLegendItem(color = RosePulse, label = "<65 Restless")
             }
         }
@@ -2037,6 +2044,11 @@ fun SleepScoreCard(analysis: com.galaxy.ring.data.SleepAnalysis) {
 
 @Composable
 fun SleepStagesCard(session: SleepSession, analysis: com.galaxy.ring.data.SleepAnalysis) {
+    val deepColor = MaterialTheme.colorScheme.primary
+    val remColor = MaterialTheme.colorScheme.secondary
+    val lightColor = MaterialTheme.colorScheme.outline
+    val awakeColor = MaterialTheme.colorScheme.tertiary
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
@@ -2071,10 +2083,10 @@ fun SleepStagesCard(session: SleepSession, analysis: com.galaxy.ring.data.SleepA
                     val lightW = analysis.lightPercent.coerceAtLeast(0.05f)
                     val awakeW = analysis.awakePercent.coerceAtLeast(0.02f)
 
-                    Box(modifier = Modifier.weight(deepW).fillMaxSize().background(Color(0xFF38BDF8)))
-                    Box(modifier = Modifier.weight(remW).fillMaxSize().background(Color(0xFFA855F7)))
-                    Box(modifier = Modifier.weight(lightW).fillMaxSize().background(Color(0xFF64748B)))
-                    Box(modifier = Modifier.weight(awakeW).fillMaxSize().background(Color(0xFFF59E0B)))
+                    Box(modifier = Modifier.weight(deepW).fillMaxSize().background(deepColor))
+                    Box(modifier = Modifier.weight(remW).fillMaxSize().background(remColor))
+                    Box(modifier = Modifier.weight(lightW).fillMaxSize().background(lightColor))
+                    Box(modifier = Modifier.weight(awakeW).fillMaxSize().background(awakeColor))
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -2084,10 +2096,10 @@ fun SleepStagesCard(session: SleepSession, analysis: com.galaxy.ring.data.SleepA
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    StageMetric(color = Color(0xFF38BDF8), name = "Deep", mins = analysis.deepMinutes, pct = (analysis.deepPercent * 100).toInt(), target = "15–25%")
-                    StageMetric(color = Color(0xFFA855F7), name = "REM", mins = analysis.remMinutes, pct = (analysis.remPercent * 100).toInt(), target = "20–25%")
-                    StageMetric(color = Color(0xFF64748B), name = "Light", mins = analysis.lightMinutes, pct = (analysis.lightPercent * 100).toInt(), target = "45–55%")
-                    StageMetric(color = Color(0xFFF59E0B), name = "Awake", mins = analysis.awakeMinutes, pct = (analysis.awakePercent * 100).toInt(), target = "<10%")
+                    StageMetric(color = deepColor, name = "Deep", mins = analysis.deepMinutes, pct = (analysis.deepPercent * 100).toInt(), target = "15–25%")
+                    StageMetric(color = remColor, name = "REM", mins = analysis.remMinutes, pct = (analysis.remPercent * 100).toInt(), target = "20–25%")
+                    StageMetric(color = lightColor, name = "Light", mins = analysis.lightMinutes, pct = (analysis.lightPercent * 100).toInt(), target = "45–55%")
+                    StageMetric(color = awakeColor, name = "Awake", mins = analysis.awakeMinutes, pct = (analysis.awakePercent * 100).toInt(), target = "<10%")
                 }
             }
         }
@@ -2259,7 +2271,7 @@ fun SetSleepTargetDialog(
                 onClick = { onConfirm(tempTarget) },
                 colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
             ) {
-                Text("Save", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                Text("Save", color = MaterialTheme.colorScheme.background, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
