@@ -647,17 +647,17 @@ fun WorkoutPhaseListCard(
                             modifier = Modifier.weight(1f)
                         )
 
-                        // Distance
+                        // Distance (null = not reported by ring; show placeholder, never a default)
                         Text(
-                            text = WorkoutFormatter.formatDistance(phase.distanceMeters, useMiles),
+                            text = phase.distanceMeters?.let { WorkoutFormatter.formatDistance(it, useMiles) } ?: "—",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f)
                         )
 
-                        // Steps
+                        // Steps (null = not reported by ring; show placeholder, never 0)
                         Text(
-                            text = "${phase.steps}",
+                            text = phase.steps?.toString() ?: "—",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
