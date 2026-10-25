@@ -17,10 +17,11 @@ object SleepApneaScreener {
 
     const val DISCLAIMER = "Informational risk indicators only — not a medical diagnosis. Consult a clinician."
 
+    // Labels are neutral descriptions of the overnight pattern, not diagnostic categories.
     enum class ApneaRiskBand(val label: String) {
-        LOW("Low Risk Indicator"),
-        MODERATE("Moderate Risk Indicator"),
-        ELEVATED("Elevated Risk Indicator"),
+        LOW("Typical variation"),
+        MODERATE("Moderate variation"),
+        ELEVATED("Higher variation"),
         INSUFFICIENT_DATA("Insufficient Data")
     }
 
