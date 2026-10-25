@@ -24,7 +24,8 @@ import {
   Download,
   Info,
   Radio,
-  FileText
+  FileText,
+  Smartphone
 } from 'lucide-react';
 import { AppLog, LogEntry } from './services/appLog';
 import {
@@ -40,7 +41,7 @@ import {
   MetricPoint,
 } from './types/models';
 
-type TabType = 'overview' | 'vitals' | 'sleep' | 'settings' | 'apnea' | 'logs';
+type TabType = 'overview' | 'vitals' | 'sleep' | 'settings' | 'apnea' | 'logs' | 'android';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -114,7 +115,6 @@ export default function App() {
   useEffect(() => {
     if (!isConnected) return;
     const interval = setInterval(() => {
-      // Natural slight fluctuation
       setCurrentHr((prev) => Math.min(105, Math.max(58, prev + Math.floor(Math.random() * 5) - 2)));
       setCurrentSpo2((prev) => Math.min(100, Math.max(95, prev + (Math.random() > 0.8 ? (Math.random() > 0.5 ? 1 : -1) : 0))));
       setCurrentHrv((prev) => Math.min(85, Math.max(38, prev + Math.floor(Math.random() * 3) - 1)));
@@ -323,6 +323,7 @@ export default function App() {
             { id: 'settings', label: 'Monitoring Settings', icon: Sliders },
             { id: 'apnea', label: 'Apnea Risk', icon: ShieldAlert },
             { id: 'logs', label: 'BLE Telemetry Logs', icon: Terminal },
+            { id: 'android', label: 'Android Native App', icon: Smartphone },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -1109,12 +1110,84 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* TAB 7: ANDROID NATIVE APP ARCHITECTURE */}
+        {activeTab === 'android' && (
+          <div className="space-y-6">
+            <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 space-y-6">
+              <div className="flex items-center space-x-3 border-b border-slate-800 pb-4">
+                <div className="p-2.5 rounded-xl bg-sky-500/10 text-sky-400">
+                  <Smartphone className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">Native Android Application (Kotlin + Jetpack Compose)</h2>
+                  <p className="text-xs text-slate-400">
+                    Full production-grade native Android source code located in /app module
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                  <div className="flex items-center space-x-2 text-sky-400">
+                    <Bluetooth className="w-4 h-4" />
+                    <h3 className="text-sm font-bold text-white">BLE & Hardware Telemetry Layer</h3>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    `GalaxyRingBLEManager.kt`, `BleRepository.kt`, `Protocol.kt`, `BrightnessProbe.kt`.
+                    Supports RWFit frame encoding/decoding, checksum verification, GATT characteristic notifications, MTU negotiation, and ring screen brightness control.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                  <div className="flex items-center space-x-2 text-emerald-400">
+                    <Activity className="w-4 h-4" />
+                    <h3 className="text-sm font-bold text-white">Health Connect Integration</h3>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    `HealthConnectWriter.kt`, `PermissionsRationaleActivity.kt`.
+                    Dual-writes heart rate, steps, sleep sessions, and skin temperature to Android's official Health Connect repository with privacy compliance.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                  <div className="flex items-center space-x-2 text-indigo-400">
+                    <Moon className="w-4 h-4" />
+                    <h3 className="text-sm font-bold text-white">Sleep & Apnea Screening Engine</h3>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    `SleepRecordParser.kt`, `SleepAnalyzer.kt`, `SleepApneaScreener.kt`.
+                    Parses 0x0505 nocturnal telemetry frames, classifies sleep hypnogram stages (Deep, REM, Light, Awake), calculates sleep efficiency, and assesses STOP-BANG risk indices.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                  <div className="flex items-center space-x-2 text-purple-400">
+                    <RefreshCw className="w-4 h-4" />
+                    <h3 className="text-sm font-bold text-white">Background Scheduling & Room DB</h3>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    `RingScheduledService.kt`, `SyncWorker.kt`, `RingDatabase.kt`, `Daos.kt`, `Entities.kt`.
+                    Continuous foreground service with battery optimization exclusions and persistent local Room SQLite database with deduplication.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-sky-950/20 border border-sky-500/30 text-xs text-slate-300 space-y-2">
+                <p className="font-semibold text-sky-400">Pre-built APK & Installation:</p>
+                <p>
+                  The compiled release and debug Android APKs are configured in <code className="text-sky-300">apk/</code> and can be installed via <code className="text-sky-300">adb install apk/GalaxyRing-debug.apk</code> or generated via <code className="text-sky-300">gradle :app:assembleDebug</code>.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Footer */}
       <footer className="border-t border-slate-800/80 bg-[#0E1422] py-4 px-4 lg:px-8 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>Galaxy Ring Telemetry Dashboard • Health Connect Sync Enabled</span>
+          <span>Galaxy Ring Telemetry Dashboard • Android Companion & Health Connect Sync</span>
           <div className="flex items-center space-x-4">
             <span className="flex items-center gap-1 text-emerald-400">
               <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
