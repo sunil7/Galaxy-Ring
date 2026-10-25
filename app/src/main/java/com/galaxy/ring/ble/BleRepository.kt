@@ -117,6 +117,16 @@ class BleRepository(
     private var simulationJob: Job? = null
     private var reconnectJob: Job? = null
     private var isUserDisconnect = false
+
+    /**
+     * True when the user explicitly disconnected from the ring during this session.
+     * Read by the scheduled/keep-alive loop (RingScheduledService) so it does not
+     * auto-reconnect against the user's choice. Cleared when connect() is called.
+     * Read-only: this property does not write any preference.
+     */
+    val isUserDisconnected: Boolean
+        get() = isUserDisconnect
+
     private var mtuFallbackRunnable: Runnable? = null
 
     /**
