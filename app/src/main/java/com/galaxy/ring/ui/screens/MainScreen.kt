@@ -351,6 +351,7 @@ fun MainScreen(
                 }
                 4 -> {
                     // More (Settings & Ring Config)
+                    // Only entry point to the Admin screen: "Open Admin Panel" in Settings.
                     SettingsScreen(
                         onOpenHealthRationale = onOpenRationale,
                         hasHealthPermissions = hasHealthPermissions,
@@ -1566,8 +1567,7 @@ fun StressCard(
 fun GalaxyRingTopBar(
     connectionState: ConnectionState,
     snapshot: RingHealthSnapshot,
-    onScanClick: () -> Unit,
-    onAdminClick: () -> Unit = {}
+    onScanClick: () -> Unit
 ) {
     TopAppBar(
         title = {
