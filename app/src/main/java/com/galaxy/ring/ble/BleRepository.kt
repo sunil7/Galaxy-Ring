@@ -1728,6 +1728,13 @@ class BleRepository(
                 mtuFallbackRunnable = null
                 AppLog.i(tagBle, "onMtuChanged: mtu=$mtu, status=$status")
                 AppLog.mtuNegotiated = mtu
+                // Only trust the negotiated value when the stack reports success; chunk sizing reads this.
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    bleManager.negotiatedMtu = mtu
+                    AppLog.i(tagBle, "Negotiated MTU set to $mtu (chunk size = ${(mtu - 3).coerceIn(20, 512)})")
+                } else {
+                    AppLog.w(tagBle, "MTU negotiation failed (status=$status); keeping negotiatedMtu=${bleManager.negotiatedMtu}")
+                }
                 if (!bleManager.servicesConfigured) {
                     mainHandler.post {
                         try {
