@@ -215,14 +215,14 @@ class BleRepository(
                     AppLog.w(tagSync, "Dropping out-of-range SpO2 live sample: ${spo2.percentage}% (valid bounds: 70..100)")
                     return@collect
                 }
-                // Spike filter: drop single-sample spikes (delta > 15% from previous sample when interval < 2 s)
+                // Spike filter: drop single-sample spikes (delta > 8% from previous sample when interval < 2 s)
                 val prevSpo2 = lastObservedSpo2Percentage
                 val prevTime = lastObservedSpo2Timestamp
                 val interval = spo2.timestamp - prevTime
-                if (prevSpo2 != null && kotlin.math.abs(spo2.percentage - prevSpo2) > 15f && interval in 0 until 2000L) {
+                if (prevSpo2 != null && kotlin.math.abs(spo2.percentage - prevSpo2) > 8f && interval in 0 until 2000L) {
                     AppLog.w(
                         tagSync,
-                        "Dropping SpO2 live spike: ${spo2.percentage}% (delta: ${kotlin.math.abs(spo2.percentage - prevSpo2)} > 15 from $prevSpo2%, interval: ${interval}ms < 2000ms)"
+                        "Dropping SpO2 live spike: ${spo2.percentage}% (delta: ${kotlin.math.abs(spo2.percentage - prevSpo2)} > 8 from $prevSpo2%, interval: ${interval}ms < 2000ms)"
                     )
                     return@collect
                 }

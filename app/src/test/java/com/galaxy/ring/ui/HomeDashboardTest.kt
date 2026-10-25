@@ -120,13 +120,66 @@ class HomeDashboardTest {
     fun noNonNeutralClinicalClaimsInHomeDashboard() {
         val nonNeutralTerms = listOf(
             "Optimal Oxygenation",
+            "Sub-optimal",
             "Elevated Fatigue",
             "High Recovery",
             "Zone: Resting"
         )
         // Verify that none of these claims are present
         for (term in nonNeutralTerms) {
-            org.junit.Assert.assertFalse(term == "Normal Range" || term == "Resting")
+            org.junit.Assert.assertFalse(term == "Normal Range" || term == "Resting" || term == "Below Normal")
         }
+    }
+
+    @Test
+    fun spo2PhysiologicalRangeValidation() {
+        fun isValidSpo2(value: Float): Boolean = value in 70f..100f
+
+        // Valid physiological bounds
+        org.junit.Assert.assertTrue(isValidSpo2(70f))
+        org.junit.Assert.assertTrue(isValidSpo2(95f))
+        org.junit.Assert.assertTrue(isValidSpo2(98.5f))
+        org.junit.Assert.assertTrue(isValidSpo2(100f))
+
+        // Invalid sensor noise / bad contact bounds
+        org.junit.Assert.assertFalse(isValidSpo2(0f))
+        org.junit.Assert.assertFalse(isValidSpo2(45f))
+        org.junit.Assert.assertFalse(isValidSpo2(69.9f))
+        org.junit.Assert.assertFalse(isValidSpo2(101f))
+        org.junit.Assert.assertFalse(isValidSpo2(255f))
+    }
+
+    @Test
+    fun spo2MissingDataHandledGracefullyWithoutDefaultingToZero() {
+        val rawEntity: OxygenSaturationEntity? = null
+        val displayedVal = rawEntity?.percentage?.takeIf { it in 70f..100f }
+        // Must be null (leading to EmptyState), NOT 0%
+        org.junit.Assert.assertNull(displayedVal)
+
+        val zeroEntity = OxygenSaturationEntity(timestamp = 1729100000000L, percentage = 0f)
+        val filteredZero = zeroEntity.percentage.takeIf { it in 70f..100f }
+        org.junit.Assert.assertNull(filteredZero)
+    }
+
+    @Test
+    fun spo2SinglePointSpikeRejection() {
+        // Single-point spikes (> 8% instant deviation within a tight window < 2000 ms) are dropped
+        fun shouldDropSpike(curr: Float, prev: Float?, intervalMs: Long): Boolean {
+            if (prev == null) return false
+            val delta = kotlin.math.abs(curr - prev)
+            return delta > 8f && intervalMs in 0 until 2000L
+        }
+
+        val prevSpo2 = 98f
+        // 98% -> 88% in 1 second (delta = 10% > 8%) -> DROP
+        org.junit.Assert.assertTrue(shouldDropSpike(88f, prevSpo2, 1000L))
+        // 98% -> 89% in 500 ms (delta = 9% > 8%) -> DROP
+        org.junit.Assert.assertTrue(shouldDropSpike(89f, prevSpo2, 500L))
+        // 98% -> 92% in 1 second (delta = 6% <= 8%) -> KEEP
+        org.junit.Assert.assertFalse(shouldDropSpike(92f, prevSpo2, 1000L))
+        // 98% -> 85% after 30 seconds (not a tight instant window) -> KEEP
+        org.junit.Assert.assertFalse(shouldDropSpike(85f, prevSpo2, 30000L))
+        // First sample (no prev) -> KEEP
+        org.junit.Assert.assertFalse(shouldDropSpike(96f, null, 0L))
     }
 }

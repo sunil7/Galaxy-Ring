@@ -185,8 +185,9 @@ object SleepAnalyzer {
         val maxHr = if (overnightHeartRate.isNotEmpty()) overnightHeartRate.maxOf { it.bpm } else null
 
         // Overnight SpO2 stats
-        val minSpo2 = if (overnightSpo2.isNotEmpty()) overnightSpo2.minOf { it.percentage } else null
-        val avgSpo2 = if (overnightSpo2.isNotEmpty()) overnightSpo2.map { it.percentage }.average().toFloat() else null
+        val validOvernightSpo2 = overnightSpo2.filter { it.percentage in 70f..100f }
+        val minSpo2 = if (validOvernightSpo2.isNotEmpty()) validOvernightSpo2.minOf { it.percentage } else null
+        val avgSpo2 = if (validOvernightSpo2.isNotEmpty()) validOvernightSpo2.map { it.percentage }.average().toFloat() else null
 
         Log.d(TAG, "Analyzed sleep: score=$totalScore, duration=${timeAsleepMinutes}m, eff=${(sleepEfficiency*100).toInt()}%, debt=${debtHours}h, consistencyStdDev=${consistencyStdDev}m")
 

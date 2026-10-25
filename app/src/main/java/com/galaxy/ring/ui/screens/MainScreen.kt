@@ -513,10 +513,11 @@ fun DeviceDashboard(
 
         // 4. Last SpO2 Card
         item {
-            val spo2Val = latestSpo2Entity?.percentage ?: snapshot.latestOxygenSaturation?.percentage
+            val rawSpo2 = latestSpo2Entity?.percentage ?: snapshot.latestOxygenSaturation?.percentage
+            val spo2Val = rawSpo2?.takeIf { it in 70f..100f }
             val spo2Timestamp = latestSpo2Entity?.timestamp ?: snapshot.latestOxygenSaturation?.timestamp
 
-            if (spo2Val != null && spo2Val > 0 && spo2Timestamp != null) {
+            if (spo2Val != null && spo2Timestamp != null) {
                 val spo2Time = timeFormatter.format(Date(spo2Timestamp))
                 MetricCard(
                     title = "Blood Oxygen",
@@ -525,7 +526,7 @@ fun DeviceDashboard(
                     subtitle = "Last measured $spo2Time",
                     icon = Icons.Default.Bloodtype,
                     accentColor = CyberCyan,
-                    onClick = onNavigateToHeart,
+                    onClick = onNavigateToActivity,
                     testTag = "home_spo2_card"
                 )
             } else {
@@ -1221,8 +1222,9 @@ fun Spo2Card(
     latestSample: OxygenSaturationSample?,
     history: List<OxygenSaturationSample>
 ) {
-    val hasSample = latestSample != null
-    val spo2Val = if (hasSample) latestSample!!.percentage else 0f
+    val validSample = latestSample?.takeIf { it.percentage in 70f..100f }
+    val hasSample = validSample != null
+    val spo2Val = if (hasSample) validSample!!.percentage else 0f
 
     Card(
         modifier = Modifier.fillMaxWidth(),

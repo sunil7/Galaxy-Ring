@@ -206,14 +206,14 @@ class RingHealthRepository(private val context: Context) {
             AppLog.w(tag, "Rejecting out-of-range SpO2 sample before DB save: $percentage% (valid bounds: 70..100)")
             return
         }
-        // Spike filter: drop single-sample spikes (delta > 15% from previous sample when interval < 2 s)
+        // Spike filter: drop single-sample spikes (delta > 8% from previous sample when interval < 2 s)
         val prevSpo2 = lastSavedSpo2Percentage
         val prevTime = lastSavedSpo2Timestamp
         val interval = timestamp - prevTime
-        if (prevSpo2 != null && kotlin.math.abs(percentage - prevSpo2) > 15f && interval in 0 until 2000L) {
+        if (prevSpo2 != null && kotlin.math.abs(percentage - prevSpo2) > 8f && interval in 0 until 2000L) {
             AppLog.w(
                 tag,
-                "Dropping SpO2 spike before DB save: $percentage% (delta: ${kotlin.math.abs(percentage - prevSpo2)} > 15 from $prevSpo2%, interval: ${interval}ms < 2000ms)"
+                "Dropping SpO2 spike before DB save: $percentage% (delta: ${kotlin.math.abs(percentage - prevSpo2)} > 8 from $prevSpo2%, interval: ${interval}ms < 2000ms)"
             )
             return
         }
@@ -502,8 +502,13 @@ class RingHealthRepository(private val context: Context) {
         val allSpo2 = spo2Dao.getAllSamplesAsc()
         var lastSpo2: OxygenSaturationEntity? = null
         for (record in allSpo2) {
+            if (record.percentage !in 70f..100f) {
+                spo2Dao.deleteById(record.id)
+                spo2Removed++
+                continue
+            }
             if (lastSpo2 != null && Math.abs(record.timestamp - lastSpo2.timestamp) <= 60000L) {
-                if (record.percentage > 0) {
+                if (record.percentage in 70f..100f) {
                     spo2Dao.deleteById(lastSpo2.id)
                     lastSpo2 = record
                 } else {

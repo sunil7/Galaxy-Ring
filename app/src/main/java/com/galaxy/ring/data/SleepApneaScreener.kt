@@ -57,13 +57,14 @@ object SleepApneaScreener {
         sleepAnalysis: SleepAnalysis? = null,
         symptoms: SelfReportSymptoms = SelfReportSymptoms()
     ): ApneaScreeningReport {
-        Log.d(TAG, "Evaluating sleep apnea screening: ${overnightSpo2.size} SpO2 samples, ${overnightHr.size} HR samples")
+        val validSpo2 = overnightSpo2.filter { it.percentage in 70f..100f }
+        Log.d(TAG, "Evaluating sleep apnea screening: ${validSpo2.size} valid SpO2 samples (from ${overnightSpo2.size}), ${overnightHr.size} HR samples")
 
         // Require at least 3 SpO₂ samples recorded during sleep
-        if (overnightSpo2.size < 3) {
+        if (validSpo2.size < 3) {
             return ApneaScreeningReport(
                 riskBand = ApneaRiskBand.INSUFFICIENT_DATA,
-                lowestSpo2 = overnightSpo2.minOfOrNull { it.percentage },
+                lowestSpo2 = validSpo2.minOfOrNull { it.percentage },
                 dipCount = 0,
                 minutesUnder90 = 0,
                 hrSurgesCount = 0,
@@ -72,11 +73,11 @@ object SleepApneaScreener {
                     "Insufficient SpO₂ data for screening. Ensure the Galaxy Ring has a snug fit with continuous night logging enabled."
                 ),
                 hasInsufficientData = true,
-                totalSpo2Samples = overnightSpo2.size
+                totalSpo2Samples = validSpo2.size
             )
         }
 
-        val sortedSpo2 = overnightSpo2.sortedBy { it.timestamp }
+        val sortedSpo2 = validSpo2.sortedBy { it.timestamp }
         val lowestSpo2 = sortedSpo2.minOf { it.percentage }
 
         // 1. Detect desaturation dips (drop of >= 3.0% from prior sample or rolling baseline)
@@ -211,7 +212,7 @@ object SleepApneaScreener {
             fragmentationNote = fragmentationNote,
             explanationBullets = bullets,
             hasInsufficientData = false,
-            totalSpo2Samples = overnightSpo2.size
+            totalSpo2Samples = validSpo2.size
         )
     }
 }

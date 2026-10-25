@@ -21,9 +21,9 @@ class SettingsAndAdminScreenTest {
         val values = ScreenBrightness.values()
         assertEquals(4, values.size)
         assertEquals("Off", ScreenBrightness.OFF.label)
-        assertEquals("Dim", ScreenBrightness.DIM.label)
-        assertEquals("Soft", ScreenBrightness.SOFT.label)
-        assertEquals("Strong", ScreenBrightness.STRONG.label)
+        assertEquals("Dim light", ScreenBrightness.DIM.label)
+        assertEquals("Soft light", ScreenBrightness.SOFT.label)
+        assertEquals("Strong light", ScreenBrightness.STRONG.label)
     }
 
     @Test

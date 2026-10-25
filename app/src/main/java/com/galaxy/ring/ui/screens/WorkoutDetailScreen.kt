@@ -125,7 +125,10 @@ fun WorkoutDetailScreen(
 
     // Prepare SpO2 points
     val spo2Points = remember(windowSpo2Entities) {
-        windowSpo2Entities.map { MetricPoint(it.timestamp, it.percentage) }.sortedBy { it.timestamp }
+        windowSpo2Entities
+            .filter { it.percentage in 70f..100f }
+            .map { MetricPoint(it.timestamp, it.percentage) }
+            .sortedBy { it.timestamp }
     }
 
     val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.US) }

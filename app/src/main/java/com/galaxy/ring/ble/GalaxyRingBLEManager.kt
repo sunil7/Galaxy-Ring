@@ -153,7 +153,7 @@ class GalaxyRingBLEManager(
     private var lastValidHrBpm: Int? = null
     private var lastValidHrTimestamp: Long = 0L
 
-    // SpO2 tracking for range and spike filtering (70..100%, spike delta > 15% when interval < 2s)
+    // SpO2 tracking for range and spike filtering (70..100%, spike delta > 8% when interval < 2s)
     private var lastValidSpo2Percentage: Float? = null
     private var lastValidSpo2Timestamp: Long = 0L
 
@@ -554,14 +554,14 @@ class GalaxyRingBLEManager(
                     if (spo2.percentage !in 70f..100f) {
                         AppLog.w(tag, "Dropping out-of-range SpO2 sample: ${spo2.percentage}% (valid bounds: 70..100)")
                     } else {
-                        // Spike filter: drop single-sample spikes (delta > 15% from previous sample when interval < 2 s)
+                        // Spike filter: drop single-sample spikes (delta > 8% from previous sample when interval < 2 s)
                         val prevSpo2 = lastValidSpo2Percentage
                         val prevTime = lastValidSpo2Timestamp
                         val interval = spo2.timestamp - prevTime
-                        if (prevSpo2 != null && kotlin.math.abs(spo2.percentage - prevSpo2) > 15f && interval in 0 until 2000L) {
+                        if (prevSpo2 != null && kotlin.math.abs(spo2.percentage - prevSpo2) > 8f && interval in 0 until 2000L) {
                             AppLog.w(
                                 tag,
-                                "Dropping SpO2 spike: ${spo2.percentage}% (delta: ${kotlin.math.abs(spo2.percentage - prevSpo2)} > 15 from $prevSpo2%, interval: ${interval}ms < 2000ms)"
+                                "Dropping SpO2 spike: ${spo2.percentage}% (delta: ${kotlin.math.abs(spo2.percentage - prevSpo2)} > 8 from $prevSpo2%, interval: ${interval}ms < 2000ms)"
                             )
                         } else {
                             lastValidSpo2Percentage = spo2.percentage

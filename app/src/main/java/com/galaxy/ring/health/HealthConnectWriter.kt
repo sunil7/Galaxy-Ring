@@ -163,8 +163,8 @@ class HealthConnectWriter(private val context: Context) {
     }
 
     suspend fun writeOxygenSaturationSample(sample: OxygenSaturationSample, isManual: Boolean = false): Boolean {
-        if (sample.percentage !in 50f..100f) {
-            AppLog.w(tag, "Skipping invalid SpO2 sample for Health Connect: ${sample.percentage}%")
+        if (sample.percentage !in 70f..100f) {
+            AppLog.w(tag, "Skipping invalid SpO2 sample for Health Connect: ${sample.percentage}% (valid bounds: 70..100)")
             return false
         }
         val client = healthConnectClient ?: run {
@@ -355,7 +355,7 @@ class HealthConnectWriter(private val context: Context) {
 
         // 2. Write SpO2 if present and valid
         snapshot.latestOxygenSaturation?.let { spo2 ->
-            if (spo2.percentage in 50f..100f) {
+            if (spo2.percentage in 70f..100f) {
                 if (writeOxygenSaturationSample(spo2, isManual = false)) {
                     writeCount++
                 }

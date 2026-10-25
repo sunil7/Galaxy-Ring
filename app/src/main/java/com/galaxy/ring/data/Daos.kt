@@ -50,16 +50,16 @@ interface OxygenSaturationDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(entities: List<OxygenSaturationEntity>)
 
-    @Query("SELECT * FROM oxygen_saturation_records WHERE timestamp >= :startOfDay AND timestamp <= :endOfDay ORDER BY timestamp ASC")
+    @Query("SELECT * FROM oxygen_saturation_records WHERE timestamp >= :startOfDay AND timestamp <= :endOfDay AND percentage >= 70.0 AND percentage <= 100.0 ORDER BY timestamp ASC")
     fun getSamplesForDay(startOfDay: Long, endOfDay: Long): Flow<List<OxygenSaturationEntity>>
 
-    @Query("SELECT * FROM oxygen_saturation_records WHERE timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp ASC")
+    @Query("SELECT * FROM oxygen_saturation_records WHERE timestamp >= :startTime AND timestamp <= :endTime AND percentage >= 70.0 AND percentage <= 100.0 ORDER BY timestamp ASC")
     fun getSamplesBetween(startTime: Long, endTime: Long): Flow<List<OxygenSaturationEntity>>
 
-    @Query("SELECT * FROM oxygen_saturation_records ORDER BY timestamp DESC LIMIT 1")
+    @Query("SELECT * FROM oxygen_saturation_records WHERE percentage >= 70.0 AND percentage <= 100.0 ORDER BY timestamp DESC LIMIT 1")
     fun getLatestSample(): Flow<OxygenSaturationEntity?>
 
-    @Query("SELECT * FROM oxygen_saturation_records ORDER BY timestamp DESC LIMIT 100")
+    @Query("SELECT * FROM oxygen_saturation_records WHERE percentage >= 70.0 AND percentage <= 100.0 ORDER BY timestamp DESC LIMIT 100")
     fun getRecentSamples(): Flow<List<OxygenSaturationEntity>>
 
     @Query("SELECT * FROM oxygen_saturation_records WHERE timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp DESC LIMIT 1")
