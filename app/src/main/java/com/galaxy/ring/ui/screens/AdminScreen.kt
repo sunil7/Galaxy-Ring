@@ -156,7 +156,7 @@ fun AdminScreen(
             },
             text = {
                 Text(
-                    text = "This action removes duplicate samples within 60 seconds from this app's local database only and does NOT change Health Connect data.",
+                    text = "This action removes duplicate samples within 60 seconds from this app's local database only and does not change Health Connect data.",
                     style = MaterialTheme.typography.bodyMedium
                 )
             },
@@ -215,7 +215,7 @@ fun AdminScreen(
             },
             text = {
                 Text(
-                    text = "This action removes all recorded samples from this app's local database only and does NOT change Health Connect data.",
+                    text = "This action removes all recorded samples from this app's local database only and does not change Health Connect data.",
                     style = MaterialTheme.typography.bodyMedium
                 )
             },
