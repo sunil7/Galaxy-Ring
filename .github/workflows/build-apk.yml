@@ -30,13 +30,16 @@ jobs:
       - name: Prepare Secrets file
         run: |
           touch .env
+          touch .env.example
           echo "# Generated in CI" >> .env
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '9.3.1'
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug
+        run: gradle assembleDebug
 
       - name: Upload APK to Artifacts
         uses: actions/upload-artifact@v4

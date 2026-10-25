@@ -4,19 +4,27 @@ An open companion Android application for the **Samsung Galaxy Ring**, designed 
 
 ---
 
-## 📱 Pre-built APK
+## 📱 Generating & Downloading the APK
 
-The compiled and signed debug APK is included directly with this repository:
-- **File**: [`apk/GalaxyRing-debug.apk`](apk/GalaxyRing-debug.apk)
-- **Target Architecture**: Universal (arm64-v8a, armeabi-v7a, x86_64)
-- **Min SDK**: Android 8.0 (API 26)
-- **Target SDK**: Android 15 (API 36)
+### Option A: 1-Click in AI Studio
+1. Open the project settings / overflow menu in the top right of the AI Studio window.
+2. Click **Generate APK** (or **Export > Generate APK / AAB**).
+3. The platform will compile and sign the APK and provide the direct download link.
 
-### Quick Install via ADB
+### Option B: Automated GitHub Actions CI/CD
+When pushed to GitHub, the workflow in [`.github/workflows/build-apk.yml`](.github/workflows/build-apk.yml) compiles the APK automatically on every push or manual dispatch. The resulting APK is published as a downloadable artifact (`galaxy-ring-debug-apk`).
+
+### Option C: Build via Local Gradle
 ```bash
-adb install apk/GalaxyRing-debug.apk
+# Build the debug APK:
+gradle assembleDebug
+
+# Output APK path:
+# app/build/outputs/apk/debug/app-debug.apk
+
+# Install via ADB:
+adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
-Or transfer `GalaxyRing-debug.apk` to your Android device and install it using your file manager (ensure "Install unknown apps" is enabled).
 
 ---
 
