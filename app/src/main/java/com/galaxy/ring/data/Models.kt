@@ -218,13 +218,15 @@ data class SportHrPoint(
 
 /**
  * Metric phase (e.g. per-kilometer or split interval) during a workout.
+ * distanceMeters and steps are null when the ring did not report them.
+ * UI must show a placeholder for null, never a default value.
  */
 data class PacePhase(
     val phaseIndex: Int,
     val durationSeconds: Long,
     val paceSeconds: Long,
-    val distanceMeters: Double = 1000.0,
-    val steps: Long = 0L
+    val distanceMeters: Double? = null,
+    val steps: Long? = null
 )
 
 /**
@@ -252,4 +254,3 @@ data class WorkoutSession(
     val hrPoints: List<SportHrPoint> = emptyList(),
     val rawPayloadHex: String = ""
 )
-
