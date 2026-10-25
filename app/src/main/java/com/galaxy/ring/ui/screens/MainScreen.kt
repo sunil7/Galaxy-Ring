@@ -2424,7 +2424,7 @@ fun BatteryCard(battery: com.galaxy.ring.data.RingBattery) {
                 } else if (battery.isCharging) {
                     "Charging now"
                 } else {
-                    "~${battery.estimatedDaysLeft.toInt()} days left"
+                    "Not charging"
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = if (hasBattery) NeonEmerald else MaterialTheme.colorScheme.onSurfaceVariant
