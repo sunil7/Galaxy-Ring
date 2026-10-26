@@ -871,7 +871,7 @@ object Protocol {
      *
      * Payload after key + keyFlag = repeated 7-byte records:
      *   [0..3] big-endian seconds since 2000-01-01 (device local wall clock)
-     *   [4]    stage code (0x01 Light, 0x02 Deep, 0x04 REM, 0x00/0x11/0x22 Awake)
+     *   [4]    stage code (0x01 Deep, 0x02 Light, 0x04 REM, 0x11 Awake, 0x00/0x22 Awake)
      *   [5..6] usually 00 00
      *
      * Records from every page are merged (SleepPageStore) and sorted, then split into nights.
