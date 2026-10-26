@@ -58,10 +58,10 @@ object SleepRecordParser {
         }.timeInMillis
     }
 
-    /** 0x01 Light, 0x02 Deep, 0x04 REM, 0x00/0x11/0x22 Awake. Unknown codes are treated as Awake (callers log them). */
+    /** 0x01 Deep, 0x02 Light, 0x04 REM, 0x11 Awake. Codes 0x00 and 0x22 also map to Awake. Unknown codes are treated as Awake (callers log them). */
     fun stageForCode(code: Int): SleepStage = when (code and 0xFF) {
-        0x01 -> SleepStage.LIGHT
-        0x02 -> SleepStage.DEEP
+        0x01 -> SleepStage.DEEP
+        0x02 -> SleepStage.LIGHT
         0x04 -> SleepStage.REM
         else -> SleepStage.AWAKE
     }
