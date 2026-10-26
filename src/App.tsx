@@ -25,7 +25,10 @@ import {
   Info,
   Radio,
   FileText,
-  Smartphone
+  Smartphone,
+  Copy,
+  Trash2,
+  Share2
 } from 'lucide-react';
 import { AppLog, LogEntry } from './services/appLog';
 import {
@@ -38,7 +41,6 @@ import {
   SelfReportSymptoms,
   ApneaScreeningReport,
   ManualMeasurementState,
-  MetricPoint,
 } from './types/models';
 
 type TabType = 'overview' | 'vitals' | 'sleep' | 'settings' | 'apnea' | 'logs' | 'android';
@@ -102,6 +104,7 @@ export default function App() {
   // Live logs
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logFilter, setLogFilter] = useState<'ALL' | 'I' | 'W' | 'E'>('ALL');
+  const [copiedLogs, setCopiedLogs] = useState<boolean>(false);
 
   // Subscribe to logs
   useEffect(() => {
@@ -260,6 +263,13 @@ export default function App() {
     if (logFilter === 'ALL') return logs;
     return logs.filter((l) => l.level === logFilter);
   }, [logs, logFilter]);
+
+  const copyAllLogs = () => {
+    const text = logs.map(l => `${l.formattedTime} [${l.level}/${l.tag}] ${l.message}`).join('\n');
+    navigator.clipboard.writeText(text);
+    setCopiedLogs(true);
+    setTimeout(() => setCopiedLogs(false), 2000);
+  };
 
   return (
     <div className="min-h-screen bg-[#090D16] text-slate-100 flex flex-col font-sans">
@@ -498,112 +508,86 @@ export default function App() {
                   <span className="text-xs text-slate-400">/ 100</span>
                 </div>
                 <div className="mt-2 flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800">
-                  <span>State: Relaxed</span>
-                  <span className="text-emerald-400">Low</span>
+                  <span>Zone: Low tension</span>
+                  <span className="text-emerald-400">Calm</span>
                 </div>
               </div>
             </div>
 
-            {/* Daily Activity & Sleep Summary Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Daily Movement */}
-              <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Footprints className="w-5 h-5 text-sky-400" />
-                    <h3 className="font-bold text-white">Daily Activity</h3>
-                  </div>
-                  <span className="text-xs text-slate-400">Today</span>
-                </div>
+            {/* Daily Activity Summary */}
+            <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Footprints className="w-5 h-5 text-emerald-400" />
+                  <span>Today's Physical Activity</span>
+                </h3>
+                <span className="text-xs font-medium text-slate-400">Goal: 10,000 steps</span>
+              </div>
 
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800">
-                    <span className="text-[11px] text-slate-400">Steps</span>
-                    <p className="text-xl font-bold text-white mt-1">{steps.toLocaleString()}</p>
-                    <span className="text-[10px] text-sky-400">Goal: 10,000 (74%)</span>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                  <div className="flex justify-between text-sm mb-1.5">
+                    <span className="text-slate-400">Steps Taken</span>
+                    <span className="font-bold text-white">{steps.toLocaleString()} / 10,000</span>
                   </div>
-                  <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800">
-                    <span className="text-[11px] text-slate-400">Active Calories</span>
-                    <p className="text-xl font-bold text-white mt-1">{calories} kcal</p>
-                    <span className="text-[10px] text-amber-400">Goal: 500 kcal</span>
-                  </div>
-                  <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800">
-                    <span className="text-[11px] text-slate-400">Distance</span>
-                    <p className="text-xl font-bold text-white mt-1">{distanceKm} km</p>
-                    <span className="text-[10px] text-emerald-400">Cadence ~110</span>
+                  <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
+                    <div
+                      className="bg-emerald-400 h-2.5 rounded-full"
+                      style={{ width: `${Math.min(100, (steps / 10000) * 100)}%` }}
+                    ></div>
                   </div>
                 </div>
 
-                {/* Progress bar */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-xs text-slate-400">
-                    <span>Progress to daily step goal</span>
-                    <span className="font-medium text-slate-200">74%</span>
+                <div>
+                  <div className="flex justify-between text-sm mb-1.5">
+                    <span className="text-slate-400">Active Calories</span>
+                    <span className="font-bold text-white">{calories} kcal</span>
                   </div>
-                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                    <div className="bg-gradient-to-r from-sky-500 to-indigo-500 h-2 rounded-full w-[74%]"></div>
+                  <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
+                    <div
+                      className="bg-rose-500 h-2.5 rounded-full"
+                      style={{ width: `${Math.min(100, (calories / 500) * 100)}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-sm mb-1.5">
+                    <span className="text-slate-400">Distance Covered</span>
+                    <span className="font-bold text-white">{distanceKm} km</span>
+                  </div>
+                  <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
+                    <div
+                      className="bg-sky-400 h-2.5 rounded-full"
+                      style={{ width: `${Math.min(100, (distanceKm / 8) * 100)}%` }}
+                    ></div>
                   </div>
                 </div>
               </div>
+            </div>
 
-              {/* Sleep Score Card */}
-              <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Moon className="w-5 h-5 text-indigo-400" />
-                    <h3 className="font-bold text-white">Last Night Sleep</h3>
-                  </div>
-                  <button
-                    onClick={() => setActiveTab('sleep')}
-                    className="text-xs text-sky-400 hover:text-sky-300 font-medium flex items-center"
-                  >
-                    <span>View Hypnogram</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
+            {/* Sleep Summary Card */}
+            <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-6">
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2 text-indigo-400 text-xs font-semibold uppercase">
+                  <Moon className="w-4 h-4" />
+                  <span>Last Night's Sleep Analysis</span>
                 </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-4xl font-black text-white">88</span>
-                    <span className="text-sm text-slate-400 ml-1.5">/ 100 Sleep Score</span>
-                    <p className="text-xs text-emerald-400 mt-1">Excellent sleep efficiency (92%)</p>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-lg font-bold text-slate-200">
-                      {Math.floor(totalSleepMinutes / 60)}h {totalSleepMinutes % 60}m
-                    </span>
-                    <p className="text-xs text-slate-400">Total duration</p>
-                  </div>
-                </div>
-
-                {/* Mini Hypnogram bar */}
-                <div className="space-y-1.5">
-                  <div className="h-4 rounded-lg overflow-hidden flex w-full">
-                    {sleepSegments.map((seg, idx) => (
-                      <div
-                        key={idx}
-                        className={`${getStageColor(seg.stage)} transition-all`}
-                        style={{ width: `${(seg.durationMinutes / (totalSleepMinutes + awakeMinutes)) * 100}%` }}
-                        title={`${seg.stage}: ${seg.durationMinutes}m`}
-                      />
-                    ))}
-                  </div>
-                  <div className="flex items-center justify-between text-[11px] text-slate-400">
-                    <span className="flex items-center gap-1">
-                      <span className="w-2 h-2 rounded bg-indigo-500 inline-block"></span> Deep: {deepMinutes}m
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="w-2 h-2 rounded bg-purple-500 inline-block"></span> REM: {remMinutes}m
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="w-2 h-2 rounded bg-sky-500 inline-block"></span> Light: {lightMinutes}m
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="w-2 h-2 rounded bg-amber-500 inline-block"></span> Awake: {awakeMinutes}m
-                    </span>
-                  </div>
-                </div>
+                <h3 className="text-xl font-bold text-white">
+                  7 hrs 45 mins • <span className="text-emerald-400">Sleep Score 88</span>
+                </h3>
+                <p className="text-xs text-slate-400 max-w-lg">
+                  Optimal deep sleep restorative cycle detected. Sleep regularity index was 92% with low nighttime awakening frequency.
+                </p>
               </div>
+
+              <button
+                onClick={() => setActiveTab('sleep')}
+                className="px-4 py-2.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-semibold transition flex items-center space-x-2"
+              >
+                <span>View Full Hypnogram</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
             </div>
           </div>
         )}
@@ -611,131 +595,86 @@ export default function App() {
         {/* TAB 2: VITALS & VIBE */}
         {activeTab === 'vitals' && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-white">Vitals & Detail Panels</h2>
-                <p className="text-xs text-slate-400">Selected Day Telemetry & Time-series aggregation</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Heart Rate Timeline & Distribution */}
-              <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div className="flex items-center space-x-2">
-                    <Heart className="w-5 h-5 text-rose-400" />
-                    <h3 className="font-bold text-white">Heart Rate (24h)</h3>
-                  </div>
-                  <span className="text-xs text-slate-400">Min 58 • Avg 72 • Max 112</span>
+            <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-white">Continuous Biosensor Telemetry</h2>
+                  <p className="text-xs text-slate-400">Photoplethysmography (PPG) and HRV waveform samples</p>
                 </div>
-
-                <div className="h-44 flex items-end space-x-1.5 pt-4">
-                  {[62, 60, 58, 64, 68, 72, 75, 84, 96, 88, 76, 72, 70, 74, 82, 92, 108, 98, 80, 74, 68, 65, 62, 60].map(
-                    (val, i) => (
-                      <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                        <div
-                          className="w-full bg-rose-500/80 hover:bg-rose-400 rounded-t transition"
-                          style={{ height: `${((val - 50) / 65) * 100}%` }}
-                          title={`${i}:00 - ${val} bpm`}
-                        ></div>
-                        <span className="text-[9px] text-slate-500">{i % 4 === 0 ? `${i}h` : ''}</span>
-                      </div>
-                    )
-                  )}
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900 text-xs text-slate-400 flex justify-between">
-                  <span>Monitoring status: All-day sampling (30 min interval)</span>
-                  <span className="text-emerald-400">Sync healthy</span>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => startMeasurement('Heart Rate')}
+                    className="px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-bold transition flex items-center space-x-1.5"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>On-demand HR</span>
+                  </button>
+                  <button
+                    onClick={() => startMeasurement('SpO₂')}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition"
+                  >
+                    Measure SpO₂
+                  </button>
+                  <button
+                    onClick={() => startMeasurement('HRV')}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition"
+                  >
+                    Measure HRV
+                  </button>
                 </div>
               </div>
 
-              {/* Blood Oxygen SpO2 Detail */}
-              <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div className="flex items-center space-x-2">
-                    <Activity className="w-5 h-5 text-sky-400" />
-                    <h3 className="font-bold text-white">Blood Oxygen (SpO₂)</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
+                {/* Heart Rate history box */}
+                <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-semibold text-rose-400 flex items-center gap-1.5">
+                      <Heart className="w-4 h-4" /> Heart Rate Profile
+                    </span>
+                    <span className="text-xs text-slate-400 font-mono">Current: {currentHr} BPM</span>
                   </div>
-                  <span className="text-xs text-slate-400">Min 94% • Avg 98%</span>
-                </div>
-
-                <div className="h-44 flex items-end space-x-1.5 pt-4">
-                  {[98, 97, 96, 95, 96, 98, 99, 98, 98, 97, 98, 99, 98, 97, 98, 98, 99, 98, 97, 96, 98, 98, 97, 98].map(
-                    (val, i) => (
-                      <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                  <div className="h-28 flex items-end space-x-1.5 pt-4">
+                    {[62, 65, 68, 72, 70, 74, 76, 71, 69, 73, 75, 72, 68, 74, currentHr].map((val, idx) => (
+                      <div key={idx} className="flex-1 flex flex-col items-center gap-1">
                         <div
-                          className="w-full bg-sky-500/80 hover:bg-sky-400 rounded-t transition"
-                          style={{ height: `${((val - 90) / 10) * 100}%` }}
-                          title={`${i}:00 - ${val}%`}
+                          className="w-full rounded-t bg-gradient-to-t from-rose-500/30 to-rose-500 transition-all duration-300"
+                          style={{ height: `${(val / 110) * 80}px` }}
                         ></div>
-                        <span className="text-[9px] text-slate-500">{i % 4 === 0 ? `${i}h` : ''}</span>
                       </div>
-                    )
-                  )}
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900 text-xs text-slate-400 flex justify-between">
-                  <span>Threshold alert (&lt;90%): None triggered</span>
-                  <span className="text-emerald-400">Safe zone</span>
-                </div>
-              </div>
-
-              {/* HRV Detail */}
-              <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div className="flex items-center space-x-2">
-                    <Zap className="w-5 h-5 text-purple-400" />
-                    <h3 className="font-bold text-white">HRV (Autonomic Balance)</h3>
+                    ))}
                   </div>
-                  <span className="text-xs text-slate-400">Avg 54 ms</span>
-                </div>
-
-                <div className="h-44 flex items-end space-x-1.5 pt-4">
-                  {[48, 52, 58, 62, 60, 54, 46, 42, 38, 44, 50, 56, 52, 48, 45, 42, 50, 54, 58, 62, 60, 56, 52, 50].map(
-                    (val, i) => (
-                      <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                        <div
-                          className="w-full bg-purple-500/80 hover:bg-purple-400 rounded-t transition"
-                          style={{ height: `${((val - 25) / 50) * 100}%` }}
-                          title={`${i}:00 - ${val} ms`}
-                        ></div>
-                        <span className="text-[9px] text-slate-500">{i % 4 === 0 ? `${i}h` : ''}</span>
-                      </div>
-                    )
-                  )}
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900 text-xs text-slate-400">
-                  Higher HRV indicates parasympathetic nervous system recovery during nocturnal rest.
-                </div>
-              </div>
-
-              {/* Stress Detail */}
-              <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div className="flex items-center space-x-2">
-                    <Sliders className="w-5 h-5 text-amber-400" />
-                    <h3 className="font-bold text-white">Scheduled Stress Trend</h3>
+                  <div className="flex justify-between text-[10px] text-slate-500 mt-2 font-mono">
+                    <span>12:00</span>
+                    <span>14:00</span>
+                    <span>16:00</span>
+                    <span>Now</span>
                   </div>
-                  <span className="text-xs text-slate-400">Max 58 • Avg 28</span>
                 </div>
 
-                <div className="h-44 flex items-end space-x-1.5 pt-4">
-                  {[18, 16, 14, 15, 18, 24, 38, 52, 58, 44, 32, 28, 26, 30, 36, 48, 40, 34, 28, 22, 18, 16, 15, 16].map(
-                    (val, i) => (
-                      <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                {/* SpO2 history box */}
+                <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-semibold text-sky-400 flex items-center gap-1.5">
+                      <Activity className="w-4 h-4" /> SpO₂ Oxygen Saturation
+                    </span>
+                    <span className="text-xs text-slate-400 font-mono">Current: {currentSpo2}%</span>
+                  </div>
+                  <div className="h-28 flex items-end space-x-1.5 pt-4">
+                    {[97, 98, 98, 99, 97, 98, 98, 99, 98, 98, 97, 98, 99, 98, currentSpo2].map((val, idx) => (
+                      <div key={idx} className="flex-1 flex flex-col items-center gap-1">
                         <div
-                          className={`w-full rounded-t transition ${
-                            val > 50 ? 'bg-rose-500' : val > 30 ? 'bg-amber-500' : 'bg-emerald-500'
-                          }`}
-                          style={{ height: `${(val / 80) * 100}%` }}
-                          title={`${i}:00 - Stress ${val}`}
+                          className="w-full rounded-t bg-gradient-to-t from-sky-500/30 to-sky-400 transition-all duration-300"
+                          style={{ height: `${((val - 90) / 10) * 80}px` }}
                         ></div>
-                        <span className="text-[9px] text-slate-500">{i % 4 === 0 ? `${i}h` : ''}</span>
                       </div>
-                    )
-                  )}
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900 text-xs text-slate-400">
-                  Computed via pulse wave analysis (PWA) interval deviations and sympathetic arousal indices.
+                    ))}
+                  </div>
+                  <div className="flex justify-between text-[10px] text-slate-500 mt-2 font-mono">
+                    <span>12:00</span>
+                    <span>14:00</span>
+                    <span>16:00</span>
+                    <span>Now</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -746,108 +685,72 @@ export default function App() {
         {activeTab === 'sleep' && (
           <div className="space-y-6">
             <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-4">
+              <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-bold text-white">Sleep Stages & Hypnogram</h2>
-                  <p className="text-xs text-slate-400">
-                    Real stages parsed from 0x0505 BLE frame records (No synthetic Light/Deep invention)
-                  </p>
+                  <h2 className="text-xl font-bold text-white">Sleep Architecture & Hypnogram</h2>
+                  <p className="text-xs text-slate-400">Computed from overnight PPG pulse variability and 3D accelerometer</p>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <span className="px-3 py-1 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-xs font-semibold">
-                    Score: 88/100
-                  </span>
-                  <span className="px-3 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold">
-                    Efficiency: 92%
-                  </span>
+                <div className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold">
+                  Score: 88 / 100
                 </div>
               </div>
 
               {/* Hypnogram Visual Timeline */}
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <div className="flex justify-between text-xs text-slate-400">
                   <span>11:00 PM</span>
-                  <span>1:00 AM</span>
-                  <span>3:00 AM</span>
-                  <span>5:00 AM</span>
-                  <span>6:30 AM</span>
+                  <span>Timeline of Sleep Stages</span>
+                  <span>7:15 AM</span>
                 </div>
-
-                <div className="h-16 w-full bg-slate-950 rounded-xl p-1.5 flex gap-1 border border-slate-800">
-                  {sleepSegments.map((segment, index) => {
-                    const pct = (segment.durationMinutes / (totalSleepMinutes + awakeMinutes)) * 100;
-                    return (
-                      <div
-                        key={index}
-                        className={`${getStageColor(
-                          segment.stage
-                        )} rounded-lg flex flex-col items-center justify-center text-[10px] font-bold shadow-sm transition hover:scale-[1.02] cursor-pointer`}
-                        style={{ width: `${pct}%` }}
-                        title={`${segment.stage}: ${segment.durationMinutes} min`}
-                      >
-                        {pct > 12 && <span>{segment.stage}</span>}
-                        {pct > 8 && <span className="text-[9px] opacity-80">{segment.durationMinutes}m</span>}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Legend */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center space-x-3">
-                    <span className="w-3 h-3 rounded-full bg-indigo-500"></span>
-                    <div>
-                      <p className="text-xs font-bold text-white">Deep Sleep</p>
-                      <p className="text-[11px] text-slate-400">
-                        {deepMinutes}m ({Math.round((deepMinutes / totalSleepMinutes) * 100)}%)
-                      </p>
+                <div className="h-14 w-full flex rounded-xl overflow-hidden border border-slate-800 bg-slate-900">
+                  {sleepSegments.map((segment, idx) => (
+                    <div
+                      key={idx}
+                      title={`${segment.stage}: ${segment.durationMinutes} mins`}
+                      style={{ width: `${(segment.durationMinutes / (totalSleepMinutes + awakeMinutes)) * 100}%` }}
+                      className={`h-full flex items-center justify-center text-[10px] font-bold border-r border-slate-900/50 transition-all hover:opacity-90 ${getStageColor(
+                        segment.stage
+                      )}`}
+                    >
+                      <span className="hidden sm:inline">{segment.stage}</span>
                     </div>
-                  </div>
-                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center space-x-3">
-                    <span className="w-3 h-3 rounded-full bg-purple-500"></span>
-                    <div>
-                      <p className="text-xs font-bold text-white">REM Sleep</p>
-                      <p className="text-[11px] text-slate-400">
-                        {remMinutes}m ({Math.round((remMinutes / totalSleepMinutes) * 100)}%)
-                      </p>
-                    </div>
-                  </div>
-                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center space-x-3">
-                    <span className="w-3 h-3 rounded-full bg-sky-500"></span>
-                    <div>
-                      <p className="text-xs font-bold text-white">Light Sleep</p>
-                      <p className="text-[11px] text-slate-400">
-                        {lightMinutes}m ({Math.round((lightMinutes / totalSleepMinutes) * 100)}%)
-                      </p>
-                    </div>
-                  </div>
-                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center space-x-3">
-                    <span className="w-3 h-3 rounded-full bg-amber-500"></span>
-                    <div>
-                      <p className="text-xs font-bold text-white">Awake</p>
-                      <p className="text-[11px] text-slate-400">{awakeMinutes}m</p>
-                    </div>
-                  </div>
+                  ))}
                 </div>
               </div>
 
-              {/* Quality Factors */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-slate-800">
-                <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
-                  <span className="text-xs text-slate-400 font-semibold">Sleep Debt</span>
-                  <p className="text-lg font-bold text-emerald-400">0 min (Met 7.5h goal)</p>
-                  <p className="text-[11px] text-slate-500">Aligned with recommended recovery</p>
+              {/* Stages Breakdown Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="p-4 rounded-xl bg-indigo-950/20 border border-indigo-500/30">
+                  <span className="text-xs font-semibold text-indigo-300">Deep Sleep</span>
+                  <p className="text-2xl font-bold text-white mt-1">{deepMinutes}m</p>
+                  <span className="text-[11px] text-slate-400">{Math.round((deepMinutes / totalSleepMinutes) * 100)}% of total</span>
                 </div>
-                <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
-                  <span className="text-xs text-slate-400 font-semibold">Awakenings</span>
-                  <p className="text-lg font-bold text-white">2 micro-awakenings</p>
-                  <p className="text-[11px] text-slate-500">Stable continuity score (94/100)</p>
+
+                <div className="p-4 rounded-xl bg-purple-950/20 border border-purple-500/30">
+                  <span className="text-xs font-semibold text-purple-300">REM Sleep</span>
+                  <p className="text-2xl font-bold text-white mt-1">{remMinutes}m</p>
+                  <span className="text-[11px] text-slate-400">{Math.round((remMinutes / totalSleepMinutes) * 100)}% of total</span>
                 </div>
-                <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
-                  <span className="text-xs text-slate-400 font-semibold">Overnight SpO₂</span>
-                  <p className="text-lg font-bold text-white">Avg 98% (Min 94%)</p>
-                  <p className="text-[11px] text-emerald-400">No apnea desaturation alerts</p>
+
+                <div className="p-4 rounded-xl bg-sky-950/20 border border-sky-500/30">
+                  <span className="text-xs font-semibold text-sky-300">Light Sleep</span>
+                  <p className="text-2xl font-bold text-white mt-1">{lightMinutes}m</p>
+                  <span className="text-[11px] text-slate-400">{Math.round((lightMinutes / totalSleepMinutes) * 100)}% of total</span>
                 </div>
+
+                <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-500/30">
+                  <span className="text-xs font-semibold text-amber-300">Awake Time</span>
+                  <p className="text-2xl font-bold text-white mt-1">{awakeMinutes}m</p>
+                  <span className="text-[11px] text-slate-400">2 brief awakenings</span>
+                </div>
+              </div>
+
+              {/* Recovery tips */}
+              <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800 space-y-2">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-sky-400">Sleep Recovery Insight</h4>
+                <p className="text-xs text-slate-300">
+                  Your deep sleep duration ({deepMinutes} mins) was above the 20% benchmark, indicating effective muscular and neuro-cognitive restoration.
+                </p>
               </div>
             </div>
           </div>
@@ -856,120 +759,99 @@ export default function App() {
         {/* TAB 4: MONITORING SETTINGS */}
         {activeTab === 'settings' && (
           <div className="space-y-6">
-            <div>
-              <h2 className="text-xl font-bold text-white">Health Monitoring & Ring Hardware Settings</h2>
-              <p className="text-xs text-slate-400">
-                Configures background BLE intervals and RWFit hardware registers
-              </p>
-            </div>
-
-            {/* Health Monitoring Section */}
             <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 space-y-6">
-              <div className="flex items-center space-x-2 border-b border-slate-800 pb-3">
-                <Sliders className="w-5 h-5 text-sky-400" />
-                <h3 className="font-bold text-white">Scheduled Monitoring Toggles & Intervals</h3>
+              <div>
+                <h2 className="text-xl font-bold text-white">Ring Monitoring Schedules</h2>
+                <p className="text-xs text-slate-400">Configure continuous background telemetry and sensor polling intervals</p>
               </div>
 
-              <div className="space-y-6">
-                {Object.values(monitoringConfigs).map((cfg) => {
-                  const intervals = [15, 30, 60, 120];
-                  return (
-                    <div key={cfg.key} className="space-y-3 pb-4 border-b border-slate-800/60 last:border-0 last:pb-0">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-bold text-white">{cfg.label}</p>
-                          <p className="text-xs text-slate-400">
-                            {cfg.enabled
-                              ? `Measuring every ${cfg.intervalMin >= 60 ? `${cfg.intervalMin / 60}h` : `${cfg.intervalMin}m`}`
-                              : 'Disabled'}
-                          </p>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={cfg.enabled}
-                            onChange={(e) => {
-                              const updated = { ...cfg, enabled: e.target.checked };
-                              setMonitoringConfigs((prev) => ({ ...prev, [cfg.key]: updated }));
-                              AppLog.i(
-                                'MonitoringSettings',
-                                `Updated ${cfg.label} toggle: ${e.target.checked ? 'ENABLED' : 'DISABLED'}`
-                              );
-                            }}
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-500"></div>
-                        </label>
-                      </div>
-
-                      {cfg.enabled && (
-                        <div className="flex items-center space-x-2">
-                          <span className="text-xs text-slate-400 mr-2">Interval:</span>
-                          {intervals.map((mins) => {
-                            const isSelected = cfg.intervalMin === mins;
-                            return (
-                              <button
-                                key={mins}
-                                onClick={() => {
-                                  const updated = { ...cfg, intervalMin: mins };
-                                  setMonitoringConfigs((prev) => ({ ...prev, [cfg.key]: updated }));
-                                  AppLog.i('MonitoringSettings', `Updated ${cfg.label} interval: ${mins}m`);
-                                }}
-                                className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
-                                  isSelected
-                                    ? 'bg-sky-500 text-slate-950 font-bold'
-                                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                                }`}
-                              >
-                                {mins >= 60 ? `${mins / 60}h` : `${mins}m`}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
+              <div className="space-y-4">
+                {Object.values(monitoringConfigs).map((cfg) => (
+                  <div
+                    key={cfg.key}
+                    className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  >
+                    <div>
+                      <h4 className="text-sm font-semibold text-white">{cfg.label}</h4>
+                      <p className="text-xs text-slate-400">Interval: Every {cfg.intervalMin} minutes</p>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
 
-            {/* Screen Brightness Section matching D2 */}
-            <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <div className="flex items-center space-x-2">
-                  <Sun className="w-5 h-5 text-amber-400" />
-                  <h3 className="font-bold text-white">Ring Display & Screen Brightness (0x0285)</h3>
+                    <div className="flex items-center space-x-3">
+                      <select
+                        value={cfg.intervalMin}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value);
+                          setMonitoringConfigs((prev) => ({
+                            ...prev,
+                            [cfg.key]: { ...prev[cfg.key], intervalMin: val },
+                          }));
+                          AppLog.i('Settings', `Updated ${cfg.label} interval to ${val} min`);
+                        }}
+                        className="bg-slate-800 text-xs text-slate-200 border border-slate-700 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-sky-500"
+                      >
+                        <option value={15}>Every 15 min</option>
+                        <option value={30}>Every 30 min</option>
+                        <option value={60}>Every 60 min</option>
+                        <option value={120}>Every 2 hours</option>
+                      </select>
+
+                      <button
+                        onClick={() => {
+                          const updated = !cfg.enabled;
+                          setMonitoringConfigs((prev) => ({
+                            ...prev,
+                            [cfg.key]: { ...prev[cfg.key], enabled: updated },
+                          }));
+                          AppLog.i('Settings', `Toggled ${cfg.label}: ${updated ? 'ENABLED' : 'DISABLED'}`);
+                        }}
+                        className={`w-12 h-6 rounded-full transition-colors relative p-0.5 ${
+                          cfg.enabled ? 'bg-sky-500' : 'bg-slate-700'
+                        }`}
+                      >
+                        <div
+                          className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                            cfg.enabled ? 'translate-x-6' : 'translate-x-0'
+                          }`}
+                        ></div>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Ring Screen / LED Brightness Section */}
+              <div className="pt-6 border-t border-slate-800 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      <Sun className="w-4 h-4 text-amber-400" />
+                      <span>Ring Sensor LED / Screen Brightness</span>
+                    </h3>
+                    <p className="text-xs text-slate-400">Controls optical sensor illumination brightness level</p>
+                  </div>
+                  <span className="text-xs font-mono text-emerald-400">{brightnessStatus}</span>
                 </div>
-                <span className="text-xs text-slate-400">{brightnessStatus}</span>
-              </div>
 
-              <p className="text-xs text-slate-400">
-                Transmits brightness opcode probe over BLE to the Galaxy Ring OLED indicator. Stops on first confirmed RX.
-              </p>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {[
-                  { level: 0 as ScreenBrightnessLevel, label: 'Off', desc: 'Display disabled' },
-                  { level: 1 as ScreenBrightnessLevel, label: 'Dim', desc: 'Low glow' },
-                  { level: 2 as ScreenBrightnessLevel, label: 'Soft', desc: 'Default comfort' },
-                  { level: 3 as ScreenBrightnessLevel, label: 'Strong', desc: 'High daylight' },
-                ].map((item) => {
-                  const isSelected = brightness === item.level;
-                  return (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { lvl: 0, label: 'Off' },
+                    { lvl: 1, label: 'Dim' },
+                    { lvl: 2, label: 'Soft' },
+                    { lvl: 3, label: 'Strong' },
+                  ].map((item) => (
                     <button
-                      key={item.level}
-                      onClick={() => handleBrightnessChange(item.level)}
-                      className={`p-3.5 rounded-xl border text-left transition ${
-                        isSelected
-                          ? 'border-sky-500 bg-sky-500/15 text-sky-300'
-                          : 'border-slate-800 bg-slate-900/60 hover:bg-slate-800 text-slate-300'
+                      key={item.lvl}
+                      onClick={() => handleBrightnessChange(item.lvl as ScreenBrightnessLevel)}
+                      className={`p-3 rounded-xl border text-xs font-semibold transition ${
+                        brightness === item.lvl
+                          ? 'bg-sky-500/20 text-sky-300 border-sky-500'
+                          : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:border-slate-700'
                       }`}
                     >
-                      <p className="text-sm font-bold">{item.label}</p>
-                      <p className="text-[11px] text-slate-400 mt-0.5">{item.desc}</p>
+                      {item.label} (Level {item.lvl})
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -979,224 +861,210 @@ export default function App() {
         {activeTab === 'apnea' && (
           <div className="space-y-6">
             <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 space-y-6">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-                <div className="flex items-center space-x-3">
-                  <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400">
-                    <ShieldAlert className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-bold text-white">Sleep Apnea & Hypoxia Risk Screening</h2>
-                    <p className="text-xs text-slate-400">
-                      Evaluates nocturnal PPG desaturations (&gt;3% drop) correlated with self-reported STOP-BANG factors
-                    </p>
-                  </div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <ShieldAlert className="w-5 h-5 text-amber-400" />
+                    <span>Sleep Apnea Risk Screener</span>
+                  </h2>
+                  <p className="text-xs text-slate-400">Heuristic overnight oxygen desaturation & breathing stability analysis</p>
                 </div>
 
                 <div
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${
+                  className={`px-3 py-1.5 rounded-xl border text-xs font-bold ${
                     apneaReport.riskBand === 'HIGH'
-                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                      ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
                       : apneaReport.riskBand === 'MODERATE'
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                      : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
                   }`}
                 >
-                  {apneaReport.riskBand} RISK BAND
+                  Risk Assessment: {apneaReport.riskBand}
                 </div>
               </div>
 
-              {/* Symptom Checklist */}
+              {/* Symptoms Checklist */}
               <div className="space-y-3">
-                <h3 className="text-sm font-bold text-white">Self-Reported Sleep Symptoms</h3>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Reported Symptoms</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {[
-                    { key: 'snoring' as keyof SelfReportSymptoms, label: 'Loud or frequent snoring' },
-                    { key: 'wakingGasping' as keyof SelfReportSymptoms, label: 'Waking up choking or gasping' },
-                    { key: 'morningHeadaches' as keyof SelfReportSymptoms, label: 'Frequent morning headaches' },
-                    { key: 'daytimeFatigue' as keyof SelfReportSymptoms, label: 'Excessive daytime sleepiness/fatigue' },
-                  ].map((symptom) => (
-                    <label
-                      key={symptom.key}
-                      className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between cursor-pointer hover:border-slate-700 transition"
-                    >
-                      <span className="text-xs text-slate-300 font-medium">{symptom.label}</span>
-                      <input
-                        type="checkbox"
-                        checked={apneaSymptoms[symptom.key]}
-                        onChange={(e) => {
-                          setApneaSymptoms((prev) => ({ ...prev, [symptom.key]: e.target.checked }));
-                          AppLog.i('ApneaScreening', `Updated symptom ${symptom.key}: ${e.target.checked}`);
-                        }}
-                        className="w-4 h-4 rounded text-sky-500 bg-slate-800 border-slate-700 focus:ring-sky-400"
-                      />
-                    </label>
-                  ))}
+                    { key: 'snoring', label: 'Chronic loud snoring during sleep' },
+                    { key: 'wakingGasping', label: 'Waking up gasping or choking' },
+                    { key: 'morningHeadaches', label: 'Frequent morning headaches' },
+                    { key: 'daytimeFatigue', label: 'Excessive daytime somnolence / fatigue' },
+                  ].map((symptom) => {
+                    const isChecked = apneaSymptoms[symptom.key as keyof SelfReportSymptoms];
+                    return (
+                      <label
+                        key={symptom.key}
+                        className="flex items-center space-x-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800 cursor-pointer hover:border-slate-700"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) =>
+                            setApneaSymptoms((prev) => ({
+                              ...prev,
+                              [symptom.key]: e.target.checked,
+                            }))
+                          }
+                          className="rounded text-sky-500 focus:ring-0 bg-slate-800 border-slate-700"
+                        />
+                        <span className="text-xs text-slate-200">{symptom.label}</span>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Clinical findings and guidance */}
-              <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-3">
-                <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Clinical Algorithm Insights</h4>
-                <ul className="text-xs text-slate-400 space-y-1.5 list-disc list-inside">
+              {/* Findings & Recommendations */}
+              <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-sky-400">Telemetry Findings</h4>
+                <ul className="space-y-1.5 text-xs text-slate-300">
                   {apneaReport.findings.map((f, i) => (
-                    <li key={i}>{f}</li>
+                    <li key={i} className="flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+                      <span>{f}</span>
+                    </li>
                   ))}
                 </ul>
-                <div className="p-3 rounded-lg bg-sky-950/30 border border-sky-500/30 text-xs text-sky-300 flex items-start space-x-2 mt-2">
-                  <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
-                  <span>{apneaReport.recommendation}</span>
+                <div className="pt-2 border-t border-slate-800 text-xs text-amber-300/90 font-medium">
+                  {apneaReport.recommendation}
                 </div>
               </div>
+
+              {/* Disclaimer */}
+              <p className="text-[11px] text-slate-500 italic">
+                Notice: Informational risk indicators only — not a clinical medical diagnosis. Consult a certified clinician or sleep specialist if symptoms persist.
+              </p>
             </div>
           </div>
         )}
 
         {/* TAB 6: BLE TELEMETRY LOGS */}
         {activeTab === 'logs' && (
-          <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <h2 className="text-xl font-bold text-white">BLE Telemetry & Protocol Logs</h2>
-                <p className="text-xs text-slate-400">
-                  Live decoding of RWFit BLE opcodes (0x051A steps, 0x0505 sleep, 0x0285 brightness, PPG frames)
-                </p>
-              </div>
+          <div className="space-y-6">
+            <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <Terminal className="w-5 h-5 text-sky-400" />
+                    <span>BLE Diagnostic Log Stream</span>
+                  </h2>
+                  <p className="text-xs text-slate-400">Live GATT packets, frame decoders, and probe transactions</p>
+                </div>
 
-              <div className="flex items-center space-x-2">
-                {(['ALL', 'I', 'W', 'E'] as const).map((lvl) => (
-                  <button
-                    key={lvl}
-                    onClick={() => setLogFilter(lvl)}
-                    className={`px-2.5 py-1 rounded text-xs font-semibold ${
-                      logFilter === lvl ? 'bg-sky-500 text-slate-950 font-bold' : 'bg-slate-800 text-slate-300'
-                    }`}
-                  >
-                    {lvl}
-                  </button>
-                ))}
-                <button
-                  onClick={() => AppLog.clear()}
-                  className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center space-x-1"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span>Clear</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-[#0B0F1A] border border-slate-800 font-mono text-xs max-h-[600px] overflow-y-auto space-y-2">
-              {filteredLogs.length === 0 ? (
-                <div className="py-8 text-center text-slate-500">No log entries matching filter</div>
-              ) : (
-                filteredLogs.map((log) => (
-                  <div key={log.id} className="flex items-start space-x-2 leading-relaxed">
-                    <span className="text-slate-500 shrink-0">{log.formattedTime}</span>
-                    <span
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${
-                        log.level === 'E'
-                          ? 'bg-rose-500/20 text-rose-400'
-                          : log.level === 'W'
-                          ? 'bg-amber-500/20 text-amber-400'
-                          : 'bg-sky-500/20 text-sky-400'
-                      }`}
-                    >
-                      {log.level}
-                    </span>
-                    <span className="text-indigo-400 shrink-0 font-semibold">[{log.tag}]</span>
-                    <span className="text-slate-300 break-all">{log.message}</span>
+                <div className="flex items-center space-x-2">
+                  <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800 text-xs">
+                    {(['ALL', 'I', 'W', 'E'] as const).map((lvl) => (
+                      <button
+                        key={lvl}
+                        onClick={() => setLogFilter(lvl)}
+                        className={`px-2.5 py-1 rounded font-mono ${
+                          logFilter === lvl ? 'bg-sky-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {lvl}
+                      </button>
+                    ))}
                   </div>
-                ))
-              )}
+
+                  <button
+                    onClick={copyAllLogs}
+                    className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition text-xs flex items-center gap-1.5"
+                    title="Copy logs"
+                  >
+                    <Copy className="w-4 h-4" />
+                    <span className="hidden sm:inline">{copiedLogs ? 'Copied!' : 'Copy'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => AppLog.clear()}
+                    className="p-2 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-300 hover:text-rose-300 transition text-xs flex items-center gap-1.5"
+                    title="Clear logs"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span className="hidden sm:inline">Clear</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Log console window */}
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-xs max-h-96 overflow-y-auto space-y-2">
+                {filteredLogs.length === 0 ? (
+                  <p className="text-slate-500 italic">No log entries matching filter.</p>
+                ) : (
+                  filteredLogs.map((log) => (
+                    <div key={log.id} className="flex items-start space-x-2 text-slate-300 leading-relaxed">
+                      <span className="text-slate-500 shrink-0">{log.formattedTime}</span>
+                      <span
+                        className={`px-1.5 py-0.2 rounded text-[10px] font-bold shrink-0 ${
+                          log.level === 'E'
+                            ? 'bg-rose-500/20 text-rose-400'
+                            : log.level === 'W'
+                            ? 'bg-amber-500/20 text-amber-400'
+                            : 'bg-sky-500/20 text-sky-400'
+                        }`}
+                      >
+                        {log.level}
+                      </span>
+                      <span className="text-slate-400 shrink-0">[{log.tag}]</span>
+                      <span className="break-all">{log.message}</span>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         )}
 
-        {/* TAB 7: ANDROID NATIVE APP ARCHITECTURE */}
+        {/* TAB 7: ANDROID NATIVE APP */}
         {activeTab === 'android' && (
           <div className="space-y-6">
             <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 space-y-6">
-              <div className="flex items-center space-x-3 border-b border-slate-800 pb-4">
-                <div className="p-2.5 rounded-xl bg-sky-500/10 text-sky-400">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   <Smartphone className="w-6 h-6" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-white">Native Android Application (Kotlin + Jetpack Compose)</h2>
-                  <p className="text-xs text-slate-400">
-                    Full production-grade native Android source code located in /app module
-                  </p>
+                  <h2 className="text-xl font-bold text-white">Android Native Application Details</h2>
+                  <p className="text-xs text-slate-400">Kotlin, Jetpack Compose, Health Connect & Room Persistence</p>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-                  <div className="flex items-center space-x-2 text-sky-400">
-                    <Bluetooth className="w-4 h-4" />
-                    <h3 className="text-sm font-bold text-white">BLE & Hardware Telemetry Layer</h3>
-                  </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    `GalaxyRingBLEManager.kt`, `BleRepository.kt`, `Protocol.kt`, `BrightnessProbe.kt`.
-                    Supports RWFit frame encoding/decoding, checksum verification, GATT characteristic notifications, MTU negotiation, and ring screen brightness control.
-                  </p>
+                <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-sky-400" />
+                    <span>Android Architecture</span>
+                  </h4>
+                  <ul className="text-xs text-slate-300 space-y-1.5 list-disc list-inside">
+                    <li><strong className="text-white">UI Layer:</strong> Jetpack Compose with Material 3 styling</li>
+                    <li><strong className="text-white">Data Layer:</strong> Room Database (Entities: HR, SpO₂, Sleep, Steps)</li>
+                    <li><strong className="text-white">BLE Engine:</strong> GalaxyRingBLEManager with custom GATT protocol</li>
+                    <li><strong className="text-white">Sync Service:</strong> Android Health Connect Writer & WorkManager worker</li>
+                  </ul>
                 </div>
 
-                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-                  <div className="flex items-center space-x-2 text-emerald-400">
-                    <Activity className="w-4 h-4" />
-                    <h3 className="text-sm font-bold text-white">Health Connect Integration</h3>
-                  </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    `HealthConnectWriter.kt`, `PermissionsRationaleActivity.kt`.
-                    Dual-writes heart rate, steps, sleep sessions, and skin temperature to Android's official Health Connect repository with privacy compliance.
+                <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Download className="w-4 h-4 text-emerald-400" />
+                    <span>Generate & Install APK</span>
+                  </h4>
+                  <p className="text-xs text-slate-300">
+                    To build or download the ready-to-run Android APK:
                   </p>
+                  <ol className="text-xs text-slate-300 space-y-1 list-decimal list-inside">
+                    <li>Click <strong className="text-white">Export &gt; Generate APK</strong> in AI Studio</li>
+                    <li>Or run <code className="bg-slate-800 px-1 py-0.5 rounded text-sky-300">gradle assembleDebug</code></li>
+                    <li>Install on any Android 8.0+ device via ADB</li>
+                  </ol>
                 </div>
-
-                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-                  <div className="flex items-center space-x-2 text-indigo-400">
-                    <Moon className="w-4 h-4" />
-                    <h3 className="text-sm font-bold text-white">Sleep & Apnea Screening Engine</h3>
-                  </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    `SleepRecordParser.kt`, `SleepAnalyzer.kt`, `SleepApneaScreener.kt`.
-                    Parses 0x0505 nocturnal telemetry frames, classifies sleep hypnogram stages (Deep, REM, Light, Awake), calculates sleep efficiency, and assesses STOP-BANG risk indices.
-                  </p>
-                </div>
-
-                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-                  <div className="flex items-center space-x-2 text-purple-400">
-                    <RefreshCw className="w-4 h-4" />
-                    <h3 className="text-sm font-bold text-white">Background Scheduling & Room DB</h3>
-                  </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    `RingScheduledService.kt`, `SyncWorker.kt`, `RingDatabase.kt`, `Daos.kt`, `Entities.kt`.
-                    Continuous foreground service with battery optimization exclusions and persistent local Room SQLite database with deduplication.
-                  </p>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-xl bg-sky-950/20 border border-sky-500/30 text-xs text-slate-300 space-y-2">
-                <p className="font-semibold text-sky-400">Pre-built APK & Installation:</p>
-                <p>
-                  The compiled release and debug Android APKs are configured in <code className="text-sky-300">apk/</code> and can be installed via <code className="text-sky-300">adb install apk/GalaxyRing-debug.apk</code> or generated via <code className="text-sky-300">gradle :app:assembleDebug</code>.
-                </p>
               </div>
             </div>
           </div>
         )}
       </main>
-
-      {/* Footer */}
-      <footer className="border-t border-slate-800/80 bg-[#0E1422] py-4 px-4 lg:px-8 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>Galaxy Ring Telemetry Dashboard • Android Companion & Health Connect Sync</span>
-          <div className="flex items-center space-x-4">
-            <span className="flex items-center gap-1 text-emerald-400">
-              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              BLE Gateway Online
-            </span>
-            <span>Firmware: R16_v2.0.4</span>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }

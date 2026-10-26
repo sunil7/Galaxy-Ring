@@ -100,33 +100,18 @@ export interface SleepSessionEntity {
   remMinutes: number;
   awakeMinutes: number;
   sleepScore: number;
-  sleepEfficiency: number;
-  stagesJson: string;
+  syncedToHealthConnect: boolean;
 }
-
-export interface MetricPoint {
-  timestamp: number;
-  value: number;
-}
-
-export interface MetricStats {
-  min: number;
-  avg: number;
-  max: number;
-  count: number;
-}
-
-export type MonitorMetricKey = 'hr' | 'spo2' | 'hrv' | 'stress';
 
 export interface MonitorConfig {
-  key: MonitorMetricKey;
+  key: string;
   label: string;
   enabled: boolean;
   intervalMin: number;
   defaultIntervalMin: number;
 }
 
-export type ScreenBrightnessLevel = 0 | 1 | 2 | 3; // Off, Dim, Soft, Strong
+export type ScreenBrightnessLevel = 0 | 1 | 2 | 3;
 
 export interface SelfReportSymptoms {
   snoring: boolean;
@@ -135,10 +120,8 @@ export interface SelfReportSymptoms {
   daytimeFatigue: boolean;
 }
 
-export type ApneaRiskBand = 'LOW' | 'MODERATE' | 'HIGH' | 'INSUFFICIENT_DATA';
-
 export interface ApneaScreeningReport {
-  riskBand: ApneaRiskBand;
+  riskBand: 'LOW' | 'MODERATE' | 'HIGH';
   confidenceScore: number;
   desaturationCount: number;
   lowestSpo2: number;
@@ -147,20 +130,16 @@ export interface ApneaScreeningReport {
   recommendation: string;
 }
 
-export type ManualMeasurementState =
-  | { status: 'IDLE' }
-  | { status: 'MEASURING'; metric: 'Heart Rate' | 'SpO₂' | 'HRV' | 'Stress'; progress: number }
-  | { status: 'COMPLETED'; metric: string; value: number; unit: string }
-  | { status: 'FAILED'; metric: string; reason: string };
+export interface ManualMeasurementState {
+  status: 'IDLE' | 'MEASURING' | 'COMPLETED' | 'ERROR';
+  metric?: string;
+  progress?: number;
+  value?: number;
+  unit?: string;
+  errorMessage?: string;
+}
 
-export interface RingHealthSnapshot {
-  battery: RingBattery;
-  steps: DailyStepsEntity;
-  lastHeartRate?: HeartRateEntity;
-  lastSpo2?: OxygenSaturationEntity;
-  lastHrv?: HrvEntity;
-  lastStress?: StressEntity;
-  lastSleepSession?: SleepSessionEntity;
-  temperatureCelsius?: number;
-  isWearDetected: boolean;
+export interface MetricPoint {
+  time: string;
+  value: number;
 }
