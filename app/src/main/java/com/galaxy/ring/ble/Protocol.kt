@@ -6,7 +6,6 @@ import com.galaxy.ring.data.OxygenSaturationSample
 import com.galaxy.ring.data.RingBattery
 import com.galaxy.ring.data.RingHealthSnapshot
 import com.galaxy.ring.data.SkinTemperature
-import com.galaxy.ring.data.SleepAnalyzer
 import com.galaxy.ring.data.SleepPageStore
 import com.galaxy.ring.data.SleepRecordParser
 import com.galaxy.ring.data.SleepSegment
@@ -929,9 +928,8 @@ object Protocol {
         }
         logNewSleepSegments(segments)
 
-        val base = SleepRecordParser.sessionFromSegments(segments)
-        val score = runCatching { SleepAnalyzer.analyze(base).sleepScore }.getOrDefault(base.qualityScore)
-        val session = base.copy(qualityScore = score)
+        // A1-S9: score hidden until matched; qualityScore stays null.
+        val session = SleepRecordParser.sessionFromSegments(segments)
         val status = if (session.isCompleted()) "COMPLETED" else "IN_PROGRESS"
 
         AppLog.i(

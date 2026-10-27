@@ -91,6 +91,7 @@ import com.galaxy.ring.data.SleepSession
 import com.galaxy.ring.data.SleepSessionEntity
 import com.galaxy.ring.data.SleepStage
 import com.galaxy.ring.data.SleepStageRecord
+import com.galaxy.ring.data.isPartial
 import com.galaxy.ring.data.toSegments
 import com.galaxy.ring.ui.theme.CyberCyan
 import com.galaxy.ring.ui.theme.ElectricViolet
@@ -371,7 +372,7 @@ fun SleepScreen(
                 } else {
                     // Sleep Score Hero Card
                     item {
-                        SleepScoreCard(analysis = analysis)
+                        SleepScoreCard(analysis = analysis, session = sessionToAnalyze)
                     }
 
                     // Feature 2: Hypnogram-Style Stage Timeline
@@ -1122,7 +1123,7 @@ fun WeekSleepOverviewCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceAround
             ) {
-                MetricPill(label = "Avg Score", value = if (hasWeekData) "$avgScore" else "--", unit = if (hasWeekData) "/100" else "", color = CyberCyan)
+                MetricPill(label = "Avg Score", value = "--", unit = "", color = CyberCyan)
                 MetricPill(label = "Avg Sleep", value = if (hasWeekData) "${avgDurationMins / 60}h ${avgDurationMins % 60}m" else "--", unit = "", color = ElectricViolet)
                 MetricPill(label = "Avg Efficiency", value = if (hasWeekData) "$avgEff" else "--", unit = if (hasWeekData) "%" else "", color = NeonEmerald)
             }
@@ -1164,7 +1165,7 @@ fun WeekSleepOverviewCard(
             } else {
                 val sessions7 = recentSessions.take(7).reversed()
 
-                // 1. Bar Chart: Sleep Score per night (last 7 nights)
+                // 1. Sleep Score per night placeholder (hidden score)
                 Text(
                     text = "Sleep Score (Last 7 Nights)",
                     style = MaterialTheme.typography.titleSmall,
@@ -1176,55 +1177,16 @@ fun WeekSleepOverviewCard(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(130.dp)
+                        .height(60.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(chartBackground)
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .background(chartBackground),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val w = size.width
-                        val h = size.height
-                        val barCount = sessions7.size.coerceAtLeast(1)
-                        val barWidth = (w / barCount) * 0.55f
-                        val stepX = w / barCount
-
-                        sessions7.forEachIndexed { i, s ->
-                            val normScore = (s.sleepScore / 100f).coerceIn(0f, 1f)
-                            val barH = normScore * (h - 20.dp.toPx())
-                            val x = i * stepX + (stepX - barWidth) / 2f
-                            val y = h - barH - 4.dp.toPx()
-
-                            val barColor = when {
-                                s.sleepScore >= 85 -> NeonEmerald
-                                s.sleepScore >= 75 -> CyberCyan
-                                s.sleepScore >= 65 -> amberColor
-                                else -> RosePulse
-                            }
-
-                            drawRoundRect(
-                                color = barColor,
-                                topLeft = Offset(x, y),
-                                size = androidx.compose.ui.geometry.Size(barWidth, barH),
-                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())
-                            )
-                        }
-                    }
-
-                    // Days Labels along bottom
-                    Row(
-                        modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter),
-                        horizontalArrangement = Arrangement.SpaceAround
-                    ) {
-                        sessions7.forEach { s ->
-                            val shortDate = s.date.takeLast(5)
-                            Text(
-                                text = shortDate,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.White.copy(alpha = 0.6f),
-                                fontSize = 10.sp
-                            )
-                        }
-                    }
+                    Text(
+                        text = "—",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -1465,7 +1427,7 @@ fun LongTermTrendsCard(
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(text = "Best Week (${bestWeek.weekLabel})", style = MaterialTheme.typography.bodySmall, color = NeonEmerald, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "${bestWeek.avgScore} pts", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = NeonEmerald)
+                    Text(text = "—", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = NeonEmerald)
                     Text(text = "Peak recovery & regularity", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -1478,13 +1440,13 @@ fun LongTermTrendsCard(
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(text = "Worst Week (${worstWeek.weekLabel})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "${worstWeek.avgScore} pts", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.tertiary)
+                    Text(text = "—", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.tertiary)
                     Text(text = "Elevated restlessness", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
 
-        // Line Chart 1: Sleep Score Trend
+        // Line Chart 1: Sleep Score Trend placeholder (hidden score)
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(22.dp),
@@ -1498,7 +1460,7 @@ fun LongTermTrendsCard(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Weekly average scores (0–100 scale)",
+                    text = "Weekly average scores",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1508,46 +1470,16 @@ fun LongTermTrendsCard(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(140.dp)
+                        .height(60.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.background)
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .background(MaterialTheme.colorScheme.background),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val w = size.width
-                        val h = size.height
-                        val minScore = 60f
-                        val maxScore = 100f
-                        val stepX = w / (weeklyAggregates.size - 1).coerceAtLeast(1)
-
-                        val points = weeklyAggregates.mapIndexed { index, item ->
-                            val x = index * stepX
-                            val normY = 1f - ((item.avgScore - minScore) / (maxScore - minScore)).coerceIn(0f, 1f)
-                            val y = normY * h
-                            Offset(x, y)
-                        }
-
-                        // Target 80 guideline
-                        val targetY = (1f - ((80f - minScore) / (maxScore - minScore))) * h
-                        drawLine(
-                            color = Color.White.copy(alpha = 0.15f),
-                            start = Offset(0f, targetY),
-                            end = Offset(w, targetY),
-                            strokeWidth = 1.dp.toPx(),
-                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 4f), 0f)
-                        )
-
-                        // Path
-                        val path = Path()
-                        points.forEachIndexed { i, pt ->
-                            if (i == 0) path.moveTo(pt.x, pt.y) else path.lineTo(pt.x, pt.y)
-                        }
-                        drawPath(path = path, color = CyberCyan, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
-
-                        points.forEach { pt ->
-                            drawCircle(color = CyberCyan, radius = 2.5.dp.toPx(), center = pt)
-                        }
-                    }
+                    Text(
+                        text = "—",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
@@ -1963,14 +1895,11 @@ fun ScoreLegendItem(color: Color, label: String) {
 }
 
 @Composable
-fun SleepScoreCard(analysis: com.galaxy.ring.data.SleepAnalysis) {
-    val score = analysis.sleepScore
-    val ratingText = when {
-        score >= 88 -> "Optimal Recovery"
-        score >= 80 -> "Good Rest"
-        score >= 70 -> "Fair Sleep"
-        else -> "Suboptimal Sleep"
-    }
+fun SleepScoreCard(
+    analysis: com.galaxy.ring.data.SleepAnalysis,
+    session: SleepSession? = null
+) {
+    val ratingText = ""
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1990,12 +1919,21 @@ fun SleepScoreCard(analysis: com.galaxy.ring.data.SleepAnalysis) {
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Text(
-                        text = ratingText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = ElectricViolet,
-                        fontWeight = FontWeight.Bold
-                    )
+                    if (session?.isPartial == true) {
+                        Text(
+                            text = "Partial data from ring",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium
+                        )
+                    } else if (ratingText.isNotEmpty()) {
+                        Text(
+                            text = ratingText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ElectricViolet,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
 
                 Box(
@@ -2006,7 +1944,7 @@ fun SleepScoreCard(analysis: com.galaxy.ring.data.SleepAnalysis) {
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "$score",
+                        text = "—",
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
                         color = ElectricViolet

@@ -353,7 +353,7 @@ class RingHealthRepository(private val context: Context) {
             lightMinutes = analysis.lightMinutes,
             remMinutes = analysis.remMinutes,
             awakeMinutes = analysis.awakeMinutes,
-            sleepScore = analysis.sleepScore,
+            sleepScore = 0, // A1-S9: hidden; 0 = no score (column is non-null Int, no schema change)
             sleepEfficiency = analysis.sleepEfficiency,
             // Real minute-level segments ("start,end,STAGE;..."), read back with SleepSessionEntity.toSegments()
             stagesJson = SleepRecordParser.encodeStages(session.stages)

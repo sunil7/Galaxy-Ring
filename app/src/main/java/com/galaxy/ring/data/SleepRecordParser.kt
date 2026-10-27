@@ -58,10 +58,10 @@ object SleepRecordParser {
         }.timeInMillis
     }
 
-    /** 0x01 Deep, 0x02 Light, 0x04 REM, 0x11 Awake. Codes 0x00 and 0x22 also map to Awake. Unknown codes are treated as Awake (callers log them). */
+    /** 0x01 Light, 0x02 Deep, 0x04 REM, 0x00/0x11/0x22 Awake. Unknown codes are treated as Awake (callers log them). */
     fun stageForCode(code: Int): SleepStage = when (code and 0xFF) {
-        0x01 -> SleepStage.DEEP
-        0x02 -> SleepStage.LIGHT
+        0x01 -> SleepStage.LIGHT
+        0x02 -> SleepStage.DEEP
         0x04 -> SleepStage.REM
         else -> SleepStage.AWAKE
     }
@@ -193,6 +193,19 @@ object SleepRecordParser {
 /** Sleep that ended more than 2 minutes ago is COMPLETED, not "currently sleeping". */
 fun SleepSession.isCompleted(nowMs: Long = System.currentTimeMillis()): Boolean =
     endTime < nowMs - SleepRecordParser.COMPLETED_AFTER_END_MS
+
+/**
+ * A1-S10: Partial-night rule as written in spec:
+ * isPartial = startHour > 22 OR startHour < 4 OR totalMinutes < 240
+ * (startHour is the local hour of startTime)
+ */
+val SleepSession.isPartial: Boolean
+    get() {
+        val cal = Calendar.getInstance().apply { timeInMillis = startTime }
+        val startHour = cal.get(Calendar.HOUR_OF_DAY)
+        val totalMinutes = durationMinutes
+        return startHour > 22 || startHour < 4 || totalMinutes < 240
+    }
 
 /** Real segments saved for this night (empty when the night was saved before segments were stored). */
 fun SleepSessionEntity.toSegments(): List<SleepSegment> = SleepRecordParser.decodeSegments(stagesJson)
