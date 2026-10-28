@@ -57,9 +57,6 @@ import androidx.compose.ui.platform.testTag
 import com.galaxy.ring.ui.theme.ActivityGreen
 import com.galaxy.ring.ui.theme.AmberGlow
 import com.galaxy.ring.ui.theme.CyberCyan
-import com.galaxy.ring.ui.theme.DarkCardBorder
-import com.galaxy.ring.ui.theme.DarkSurface
-import com.galaxy.ring.ui.theme.DarkSurfaceVariant
 import com.galaxy.ring.ui.theme.ElectricViolet
 import com.galaxy.ring.ui.theme.RosePulse
 import com.galaxy.ring.ui.theme.SectionHeader
@@ -307,8 +304,8 @@ fun WorkoutEmptyState(
             .fillMaxWidth()
             .testTag("workout_empty_state"),
         shape = ShapeMedium,
-        colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant.copy(alpha = 0.35f)),
-        border = BorderStroke(1.dp, DarkCardBorder.copy(alpha = 0.4f))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
     ) {
         Column(
             modifier = Modifier
@@ -337,7 +334,7 @@ fun WorkoutEmptyState(
                 enabled = !isSyncing,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = CyberCyan,
-                    contentColor = Color(0xFF021B2D)
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
                 shape = ShapeSmall,
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
@@ -409,8 +406,8 @@ fun WorkoutSessionCard(
     Card(
         modifier = cardModifier,
         shape = ShapeMedium,
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        border = BorderStroke(1.dp, DarkCardBorder.copy(alpha = 0.6f))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.6f))
     ) {
         Column(
             modifier = Modifier
@@ -458,7 +455,7 @@ fun WorkoutSessionCard(
 
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = DarkSurfaceVariant.copy(alpha = 0.5f)
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 ) {
                     Text(
                         text = durationStr,

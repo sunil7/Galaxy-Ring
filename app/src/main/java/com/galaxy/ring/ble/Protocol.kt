@@ -213,10 +213,8 @@ object Protocol {
     }
 
     /**
-     * Helper to build an ACK frame (flag 0x11) for an incoming command frame (flag 0x01).
-     * Format: AB 11 00 03 [crc16] [key(2)] [keyFlag].
-     * Note: ACK helper exists, but the app does not send ACK on every 0x01; the notification
-     * path does not pass a gatt handle and does not send ACK.
+     * Generates an ACK frame for an incoming command frame (flag 0x01).
+     * ACK format: AB 11 00 03 [crc16] [key(2)] [keyFlag]
      */
     fun buildAckFrame(key: Int, keyFlag: Byte): ByteArray {
         return encodeFrame(

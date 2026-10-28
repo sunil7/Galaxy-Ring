@@ -1278,14 +1278,13 @@ fun Spo2Card(
                         modifier = Modifier.padding(bottom = 6.dp)
                     )
                     Spacer(modifier = Modifier.weight(1f))
-                    val isOptimal = spo2Val >= 95f
                     Text(
-                        text = if (isOptimal) "Normal Range" else "Below Normal",
+                        text = "Latest reading",
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (isOptimal) NeonEmerald else Color(0xFFF59E0B),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background((if (isOptimal) NeonEmerald else Color(0xFFF59E0B)).copy(alpha = 0.15f))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }

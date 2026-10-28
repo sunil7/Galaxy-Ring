@@ -1867,7 +1867,7 @@ fun SleepCalendarView(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceAround
             ) {
-                ScoreLegendItem(color = NeonEmerald, label = "≥85")
+                ScoreLegendItem(color = NeonEmerald, label = "≥85 Optimal")
                 ScoreLegendItem(color = CyberCyan, label = "75–84 Good")
                 ScoreLegendItem(color = MaterialTheme.colorScheme.tertiary, label = "65–74 Fair")
                 ScoreLegendItem(color = RosePulse, label = "<65 Restless")

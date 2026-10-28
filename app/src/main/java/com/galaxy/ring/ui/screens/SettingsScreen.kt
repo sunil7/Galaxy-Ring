@@ -74,10 +74,6 @@ import com.galaxy.ring.data.MonitoringSettings
 import com.galaxy.ring.data.ScreenBrightness
 import com.galaxy.ring.sync.RingScheduledService
 import com.galaxy.ring.ui.applyMonitoringChange
-import com.galaxy.ring.ui.theme.CyberCyan
-import com.galaxy.ring.ui.theme.ElectricViolet
-import com.galaxy.ring.ui.theme.NeonEmerald
-import com.galaxy.ring.ui.theme.RosePulse
 import com.galaxy.ring.ui.theme.SectionHeader
 import com.galaxy.ring.ui.theme.ShapeMedium
 import com.galaxy.ring.ui.theme.ShapeSmall
@@ -142,7 +138,7 @@ fun SettingsScreen(
                 Icon(
                     imageVector = Icons.Default.BatteryAlert,
                     contentDescription = null,
-                    tint = NeonEmerald
+                    tint = MaterialTheme.colorScheme.primary
                 )
             },
             title = {
@@ -267,7 +263,7 @@ fun SettingsScreen(
                             imageVector = Icons.Default.CalendarMonth,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp),
-                            tint = CyberCyan
+                            tint = MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.width(Spacing.sm))
                         Text(
@@ -477,7 +473,7 @@ fun SettingsScreen(
                             text = brightnessStatusMessage!!,
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium,
-                            color = RosePulse
+                            color = MaterialTheme.colorScheme.error
                         )
                     }
                 }
@@ -603,7 +599,7 @@ fun SettingsScreen(
                         Text(
                             text = "Result: ${repo.lastScheduleRunResult}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (repo.lastScheduleRunResult?.contains("Error") == true || repo.lastScheduleRunResult?.contains("skipped") == true) RosePulse else NeonEmerald
+                            color = if (repo.lastScheduleRunResult?.contains("Error") == true || repo.lastScheduleRunResult?.contains("skipped") == true) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary
                         )
                     }
                 }
@@ -799,7 +795,7 @@ fun SettingsScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(ShapeSmall)
-                                .background(RosePulse.copy(alpha = 0.12f))
+                                .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f))
                                 .padding(Spacing.md)
                         ) {
                             Text(
@@ -851,7 +847,7 @@ fun SettingsScreen(
                                 text = if (hasHealthPermissions) "Granted" else "Denied",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.Bold,
-                                color = if (hasHealthPermissions) NeonEmerald else RosePulse
+                                color = if (hasHealthPermissions) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error
                             )
                         }
 
@@ -890,7 +886,7 @@ fun SettingsScreen(
                                 text = lastWriteStatus,
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = if (lastWriteTime != null) NeonEmerald else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (lastWriteTime != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
@@ -907,7 +903,7 @@ fun SettingsScreen(
                                 text = lastWriteError ?: "None",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = if (lastWriteError != null) RosePulse else NeonEmerald
+                                color = if (lastWriteError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary
                             )
                         }
                     }

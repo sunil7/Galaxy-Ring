@@ -36,13 +36,6 @@ import com.galaxy.ring.data.SleepRecordParser
 import com.galaxy.ring.data.SleepSegment
 import com.galaxy.ring.data.SleepStage
 
-private fun stageColor(stage: SleepStage): Color = when (stage) {
-    SleepStage.DEEP -> Color(0xFF3F51B5)
-    SleepStage.LIGHT -> Color(0xFF64B5F6)
-    SleepStage.REM -> Color(0xFFAB47BC)
-    SleepStage.AWAKE -> Color(0xFFFFB74D)
-}
-
 private fun stageRow(stage: SleepStage): Int = when (stage) {
     SleepStage.AWAKE -> 0
     SleepStage.REM -> 1
@@ -58,6 +51,18 @@ private fun stageRow(stage: SleepStage): Int = when (stage) {
  */
 @Composable
 fun SleepHypnogram(segments: List<SleepSegment>, modifier: Modifier = Modifier) {
+    val colorScheme = MaterialTheme.colorScheme
+    val deepColor = colorScheme.primary
+    val remColor = colorScheme.secondary
+    val lightColor = colorScheme.outline
+    val awakeColor = colorScheme.tertiary
+
+    fun stageColor(stage: SleepStage): Color = when (stage) {
+        SleepStage.DEEP -> deepColor
+        SleepStage.LIGHT -> lightColor
+        SleepStage.REM -> remColor
+        SleepStage.AWAKE -> awakeColor
+    }
     if (segments.isEmpty()) {
         Text(
             text = "No sleep stage detail from the ring for this night.",
