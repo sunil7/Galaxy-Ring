@@ -42,9 +42,9 @@ import java.util.UUID
  * 2. Only service 0xA00A: write WITH response to 0xB002 (chunk to MTU-3); notify only from 0xB003.
  * 3. Single-threaded command queue + state machine.
  * 4. CCCD enabled on 0xB003 once; wait for onDescriptorWrite before sending commands.
- * 5. ACK frames (flag 0x11) for incoming command frames (flag 0x01): the current build does NOT send
- *    them. The ACK branch in onNotificationReceived is gated on a gatt handle that the notification
- *    path does not pass, so no ACK is written. Sending ACKs is pending device verification.
+ * 5. ACK frames (flag 0x11) for incoming command frames (flag 0x01): ACK helper exists, but the app
+ *    does not send ACK on every 0x01. The notification path does not pass a gatt handle and does
+ *    not send ACK. Sending ACKs is pending device verification.
  * 6. Pushes (flag 0x21) parsed without ACK or completing pending command.
  */
 class GalaxyRingBLEManager(
@@ -507,8 +507,8 @@ class GalaxyRingBLEManager(
                 }
 
                 // 4. ACK path (flag 0x01 -> ACK 0x11). PENDING DEVICE VERIFICATION.
-                //    Only runs when a gatt handle is passed in. The current notification path
-                //    (BleRepository) passes none, so no ACK frame is written from here.
+                //    ACK helper exists, but the app does not send ACK on every 0x01; the notification
+                //    path does not pass a gatt handle and does not send ACK.
                 if (frame.flag == Protocol.FLAG_COMMAND && gatt != null) {
                     scope.launch {
                         try {
