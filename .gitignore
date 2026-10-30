@@ -11,13 +11,19 @@
 .DS_Store
 /build
 /captures
+node_modules/
+dist/
+bun.lock
 .externalNativeBuild
 .cxx
 local.properties
 .env
-debug.keystore
-debug.keystore.base64
+# Production release keys remain ignored
+my-upload-key.jks
 *.jks
-*.keystore
 *.p12
+
+# Track permanent debug keystore so all CI/local builds share the exact same signature
+!debug.keystore
+!debug.keystore.base64
 .build-outputs/

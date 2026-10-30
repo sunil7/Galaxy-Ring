@@ -18,27 +18,29 @@ In the AI Studio platform:
 The repository includes a ready-to-run GitHub Actions workflow (`.github/workflows/build-apk.yml`):
 1. Push this repository to GitHub or trigger the workflow manually under the **Actions** tab (**"Build Android APK" > "Run workflow"**).
 2. The workflow will automatically compile the project with JDK 21 and Gradle 9.3.1.
-3. Download the built APK directly from the **Artifacts** section (`galaxy-ring-debug-apk`).
+3. Download the built APK directly from the **Artifacts** section (`GalaxyRing-v1.0.1`) or from the `/apk` folder in the repository (`apk/GalaxyRing-v1.0.1.apk`).
 
 ---
 
 ### 3. Local CLI or Android Studio
 If you clone or export this repository locally:
 ```bash
-# Build the debug APK using Gradle
+# Build the APK using Gradle
 gradle assembleDebug
 
 # Output APK path:
 # app/build/outputs/apk/debug/app-debug.apk
 
 # Install directly to a connected Android phone or ring test device via ADB:
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r apk/GalaxyRing-v1.0.1.apk
 ```
 
 ---
 
 ## 📦 APK Specifications
+- **File Name**: `GalaxyRing-v1.0.1.apk`
 - **Package ID**: `com.aistudio.galaxyring.kjnpqm`
+- **Version**: 1.0.1 (`versionCode = 2`)
 - **Min SDK**: Android 8.0 (API 26)
 - **Target SDK**: Android 15 (API 36)
 - **Architectures**: Universal (`arm64-v8a`, `armeabi-v7a`, `x86_64`)
